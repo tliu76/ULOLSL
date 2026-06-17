@@ -25,26 +25,29 @@ from utils import (
 )
 
 # sklearn MLP search grids
-ARCH_GRID  = [(50,), (100,), (200,), (100, 50)]
+ARCH_GRID  = [(100,), (200,), (150, 75), (100, 50), (200, 100)]
 LR_GRID    = [0.001, 0.01, 0.05, 0.1]
 ALPHA_GRID = [0.0001, 0.001, 0.01, 0.1]
-WIDTH_GRID = [25, 50, 100, 150, 200]
+WIDTH_GRID = [25, 50, 100, 150, 200, 256]
 
-# Architectures for depth-vs-width study (~12 k params each with 54 inputs, 7 outputs)
+# Architectures for depth-vs-width study (~10-12k params each with 54 inputs, 7 outputs)
 #   (200,)      : 54×200 + 200×7              ≈ 12 200 params  [1 layer]
 #   (100, 50)   : 54×100 + 100×50 + 50×7     ≈ 10 750 params  [2 layers]
-#   (64, 64, 32): 54×64 + 64×64 + 64×32 + 32×7 ≈  9 000 params  [3 layers]
+#   (64, 64, 32): 54×64 + 64×64 + 64×32 + 32×7 ≈  9 800 params  [3 layers]
 DEPTH_WIDTH_ARCHS = [(200,), (100, 50), (64, 64, 32)]
 DEPTH_WIDTH_LABELS = ["1L-200", "2L-100×50", "3L-64×64×32"]
 
 # PyTorch fixed params
-PT_HIDDEN      = 100
-PT_LR          = 0.01
+PT_HIDDEN      = 150
+PT_LR          = 0.05
 PT_WD          = 1e-4
-PT_BATCH       = 64
-PT_EPOCHS      = 200
-PT_PATIENCE    = 20
-ACT_EPOCHS     = 150   # max epochs for the activation function study (extra credit)
+PT_BATCH       = 128
+PT_EPOCHS      = 500
+PT_PATIENCE    = 30
+ACT_EPOCHS     = 300   # max epochs for the activation function study (extra credit)
+
+# PyTorch LR candidates to search
+PT_LR_GRID = [0.01, 0.05, 0.1]
 
 
 def _cv_mean(est, X, y) -> float:
@@ -357,12 +360,26 @@ def run_nn_pytorch(X_train, y_train, X_test, y_test, tag: str = "covertype") -> 
     loader_tr  = make_loader(X_tr2, y_tr2)
     loader_val = make_loader(X_val, y_val, shuffle=False)
 
-    # ── Default model ─────────────────────────────────────────────────────
-    print(f"  Training default model (h={PT_HIDDEN}, lr={PT_LR}, wd={PT_WD}) ...")
+    # ── LR tuning ─────────────────────────────────────────────────────────
+    print("  Tuning PyTorch LR ...")
+    best_pt_lr, best_pt_lr_f1 = PT_LR, -1.0
+    for lr_cand in PT_LR_GRID:
+        m_cand = MLP(n_feats, PT_HIDDEN, n_cls)
+        m_cand, _, _ = train_model(m_cand, loader_tr, loader_val, 100, lr_cand, PT_WD, 15)
+        cand_preds = predict_all(m_cand, X_val)
+        cand_f1 = f1_score(y_val, cand_preds, average="macro", zero_division=0)
+        print(f"    lr={lr_cand}  val Macro F1={cand_f1:.4f}")
+        if cand_f1 > best_pt_lr_f1:
+            best_pt_lr_f1 = cand_f1
+            best_pt_lr = lr_cand
+    print(f"  Best PyTorch LR={best_pt_lr}")
+
+    # ── Final model ───────────────────────────────────────────────────────
+    print(f"  Training final model (h={PT_HIDDEN}, lr={best_pt_lr}, wd={PT_WD}) ...")
     model = MLP(n_feats, PT_HIDDEN, n_cls)
     t0    = time.perf_counter()
     model, history, stop_ep = train_model(
-        model, loader_tr, loader_val, PT_EPOCHS, PT_LR, PT_WD, PT_PATIENCE
+        model, loader_tr, loader_val, PT_EPOCHS, best_pt_lr, PT_WD, PT_PATIENCE
     )
     fit_t = time.perf_counter() - t0
 
@@ -371,7 +388,7 @@ def run_nn_pytorch(X_train, y_train, X_test, y_test, tag: str = "covertype") -> 
     pred_t = time.perf_counter() - t0
 
     metrics = eval_metrics(y_test, y_pred, fit_t, pred_t)
-    metrics.update({"hidden": PT_HIDDEN, "lr": PT_LR, "wd": PT_WD,
+    metrics.update({"hidden": PT_HIDDEN, "lr": best_pt_lr, "wd": PT_WD,
                     "stop_epoch": stop_ep})
     print(f"  Test Macro F1={metrics['macro_f1']:.4f}  Acc={metrics['accuracy']:.4f}  "
           f"Epochs={stop_ep}  Fit={fit_t:.2f}s")
@@ -476,7 +493,7 @@ def run_nn_pytorch(X_train, y_train, X_test, y_test, tag: str = "covertype") -> 
     fig, ax = plt.subplots(figsize=(9, 5))
     for act_name, act_cls in activations.items():
         m  = MLP(n_feats, PT_HIDDEN, n_cls, act_cls=act_cls)
-        m, h, ep = train_model(m, loader_tr, loader_val, ACT_EPOCHS, PT_LR, PT_WD, PT_PATIENCE)
+        m, h, ep = train_model(m, loader_tr, loader_val, ACT_EPOCHS, best_pt_lr, PT_WD, PT_PATIENCE)
         preds = predict_all(m, X_test)
         test_f1 = f1_score(y_test, preds, average="macro", zero_division=0)
         act_results[act_name] = {"test_macro_f1": round(test_f1, 4), "stop_epoch": ep}

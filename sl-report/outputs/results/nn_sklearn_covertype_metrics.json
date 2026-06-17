@@ -1,11 +1,11 @@
 {
-  "macro_f1": 0.6425,
-  "accuracy": 0.801,
-  "balanced_accuracy": 0.6056,
-  "fit_s": 9.524,
+  "macro_f1": 0.6783,
+  "accuracy": 0.8075,
+  "balanced_accuracy": 0.6457,
+  "fit_s": 32.969,
   "predict_s": 0.008,
-  "arch": "(100, 50)",
+  "arch": "(200, 100)",
   "lr": 0.1,
-  "alpha": 0.0001,
-  "n_epochs": 114
+  "alpha": 0.1,
+  "n_epochs": 146
 }

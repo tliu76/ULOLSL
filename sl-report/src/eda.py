@@ -8,13 +8,11 @@ Produces:
   - Figures saved to outputs/eda/
 """
 
-# %%
 import os
 import numpy as np
 import pandas as pd
 import matplotlib
-# matplotlib.use("Agg")
-matplotlib.use("MacOSX")
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.patches import Patch
@@ -24,67 +22,19 @@ from sklearn.feature_selection import mutual_info_classif
 from sklearn.dummy import DummyClassifier
 from sklearn.metrics import accuracy_score, f1_score
 
-plt.rcParams.update({"axes.grid": True, "grid.color": "white", "axes.facecolor": "#EAEAF2"})
+plt.rcParams.update({"axes.grid": True, "grid.color": "white", "axes.facecolor": "#EAEAF2",
+                     "axes.titlesize": 11, "xtick.labelsize": 8, "ytick.labelsize": 8})
 
-### reference guidance: https://github.com/chuawt/eda-starter ###
-### https://www.geeksforgeeks.org/data-analysis/exploratory-data-analysis-in-python/
-# %%
 # ── Paths & constants ────────────────────────────────────────────────────────
 DATA_PATH   = os.path.join(os.path.dirname(__file__), "..", "data", "covtype.data")
-INFO_PATH  =  os.path.join(os.path.dirname(__file__), "..", "data", "covtype.info")
+INFO_PATH   = os.path.join(os.path.dirname(__file__), "..", "data", "covtype.info")
 OUT_DIR     = os.path.join(os.path.dirname(__file__), "..", "outputs", "eda")
 SAMPLE_PATH = os.path.join(os.path.dirname(__file__), "..", "outputs", "sample.csv")
 
-RANDOM_SEED = 4
-SAMPLE_SIZE = 2000 
+RANDOM_SEED = 42
+SAMPLE_SIZE = 20_000
 
-
-
-
-# %%
-def ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-
-def save(fig: plt.Figure, name: str) -> None:
-    fig.savefig(os.path.join(OUT_DIR, name), dpi=150, bbox_inches="tight")
-    if os.environ.get("EDA_SHOW"):
-        fig.show()
-    else:
-        plt.close(fig)
-
-
-
-
-# get the full dataset ### 
-def download_covtype():
-    bunch = fetch_covtype(as_frame=True)
-    df = bunch.frame.copy()
-    df.columns = FEATURE_COLS + [TARGET_COL]
-    os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
-    df.to_csv(DATA_PATH, header=False, index=False)
-    return df
-
-### read the data from local path if exists, otherwise download from sklearn.datasets ### 
-def load_full() -> pd.DataFrame:
-    if not os.path.exists(DATA_PATH):
-        print(f"[eda] {DATA_PATH} not found. Downloading from sklearn.datasets ...")
-        return download_covtype()
-    return pd.read_csv(DATA_PATH, header=None, names=FEATURE_COLS + [TARGET_COL])
-
-
-
-# Names from covtype.info
-with open(INFO_PATH, "r") as f:
-    info = f.read()
-
-print(info)
-### number of instances (observations): 581,012
-### number of attributes (features): 12 measures, but 54 columns of data (10 quantitative variables, 4 binary wilderness areas and 40 binary soil type variables)
-### Given is the attribute name, attribute type, the measurement unit and a brief description.
-
-
-# Names from covtype.info
+# ── Column definitions ───────────────────────────────────────────────────────
 CONTINUOUS_COLS = [
     "Elevation", "Aspect", "Slope",
     "Horizontal_Distance_To_Hydrology", "Vertical_Distance_To_Hydrology",
@@ -107,74 +57,20 @@ CLASS_NAMES = {
     7: "Krummholz",
 }
 
-
-### Loading the full dataset. ###
-df = load_full()
-df.info()
-
-print(df.head())
-
-
-# ── 1. Full-dataset Exploratory Data Analysis ─────────────────────────────────────────────── 
-def print_basic_info(df:pd.DataFrame) -> None:
-    """ print basic dataset information"""
-    print("=" * 60)
-    print("FULL DATASET SUMMARY")
-    print("=" * 60)
-    print(f"Shape            : {df.shape}")
-    print(f"Missing values   : {df.isnull().sum().sum()}")
-    print(f"Duplicate rows  : {df.duplicated().sum()}")
-    print()
-
-# ── 2. Class distribution summary for the full dataset ───────────────────────────────────────────────
-def print_class_distribution(df: pd.DataFrame) -> pd.Series:
-    """  print class counts and percentages 
-         Return value counts for reuse in plotting
-    """
-    vc = df[TARGET_COL].value_counts().sort_index()
-    pct = vc / len(df) * 100
-    print("Class distribution: (full dataset)")
-    for cls in range(1, 8):
-        print(f"  C{cls} ({CLASS_NAMES[cls]:<22}): {vc[cls]:>8,} instances ({pct[cls]:>6.2f}%)")
-    print()
-    return vc
-
-# ── 3. Continuous feature summary for the full dataset ───────────────────────────────────────────────
-def print_continuous_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """ 
-    print summary statistics for continuous features 
-    Return the stats table for possible reuse in plotting
-    """
-    stats = df[CONTINUOUS_COLS].describe().T
-    stats["range"] = stats["max"] - stats["min"]
-    print("Continuous feature summary (full)")
-    print(stats[["mean", "std", "min", "25%", "50%", "75%", "max", "range"]])
-    print()
-    return stats
-    
-
-# ── 4. Categorical feature summary for the full dataset ───────────────────────────────────────────────
-def print_categorical_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """ 
-    print summary statistics for categorical features 
-    Return the stats table for possible reuse in plotting
-    One-hot encoded features
-    """
-    stats = df[WILDERNESS_COLS + SOIL_COLS].describe().T
-    print("Categorical feature summary (full)")
-    print(stats[["count", "unique", "top", "freq"]])
-    print()
-    return stats
-
-
-
-# ── Section Name ────────────────────────────────────────────────────────
-##  Color palette for consistent plotting ##
-# 1. Global plot configurations (removes repetitive font size and layout tweaks)
-plt.rcParams.update({"axes.titlesize": 11, "xtick.labelsize": 8, "ytick.labelsize": 8})
 PALETTE = [plt.cm.tab10(i / 10) for i in range(7)]
 
-def finalize_and_save(fig, filename, save, xlabel=None, ylabel=None):
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+def ensure_dir(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+
+def save(fig: plt.Figure, name: str) -> None:
+    fig.savefig(os.path.join(OUT_DIR, name), dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def finalize_and_save(fig, filename, xlabel=None, ylabel=None):
     if xlabel:
         plt.xlabel(xlabel)
     if ylabel:
@@ -182,119 +78,27 @@ def finalize_and_save(fig, filename, save, xlabel=None, ylabel=None):
     plt.tight_layout()
     save(fig, filename)
 
-# 6. Plotting: Class Distribution
-def plot_class_distribution(vc: pd.Series, save) -> None:
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.bar(vc.index, vc.values, color=PALETTE, alpha=0.8)
-    ax.set_xticks(vc.index)
-    ax.set_xticklabels([f"C{cls}\n{CLASS_NAMES[cls]}" for cls in vc.index], rotation=30, ha="right")
-    ax.set_title("Class Distribution (Full Dataset)")
-    finalize_and_save(fig, "class_distribution_full.png", save)
 
-# 6. Plotting: Class Distribution
-def plot_class_distribution(df: pd.DataFrame, vc: pd.Series, save) -> None:
-    fig, ax = plt.subplots(figsize=(8, 4))
-
-    # Map numeric class IDs directly to their human-readable names
-    labels = [CLASS_NAMES[i] for i in vc.index]
-    bars = ax.bar(labels, vc.values, color=PALETTE)
-
-    # Automatically label bars with thousands separator
-    ax.bar_label(bars, labels=[f"{v:,}" for v in vc.values], padding=3, fontsize=8)
-    ax.set(title=f"Full Dataset — Class Distribution (N={len(df):,})", ylabel="Count")
-    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
-
-    plt.xticks(rotation=25, ha="right")
-    finalize_and_save(fig, "class_dist_full.png", save, xlabel="Cover Type")
+# ── Data loading ─────────────────────────────────────────────────────────────
+def download_covtype():
+    bunch = fetch_covtype(as_frame=True)
+    df = bunch.frame.copy()
+    df.columns = FEATURE_COLS + [TARGET_COL]
+    os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
+    df.to_csv(DATA_PATH, header=False, index=False)
+    return df
 
 
-# 7. Plotting: Continuous Variables Z-Score Boxplots
-def plot_continuous_boxplots(df: pd.DataFrame, save) -> None:
-    # Vectorized Z-score calculation
-    z = (df[CONTINUOUS_COLS] - df[CONTINUOUS_COLS].mean()) / df[CONTINUOUS_COLS].std()
-
-    fig, ax = plt.subplots(figsize=(10, 4))
-    # Lean pandas boxplot integration
-    z.boxplot(
-        ax=ax,
-        vert=False,
-        patch_artist=True,
-        boxprops=dict(facecolor="steelblue", alpha=0.6),
-        medianprops=dict(color="red"),
-    )
-    ax.axvline(0, color="gray", lw=0.8, ls="--")
-    ax.set_title("Full Dataset — Continuous Features (z-scored)")
-
-    finalize_and_save(
-        fig,
-        "continuous_boxplots_full.png",
-        save,
-        xlabel="Standard deviations from mean",
-    )
-# 8. Plotting: Raw Feature Value Ranges
-def plot_feature_ranges(df: pd.DataFrame, save) -> None:
-    fig, ax = plt.subplots(figsize=(8, 4))
-
-    # Clean one-liner calculation and pandas horizontal bar plot
-    (df[CONTINUOUS_COLS].max() - df[CONTINUOUS_COLS].min()).plot(
-        kind="barh", ax=ax, color="steelblue", alpha=0.7
-    )
-    ax.set_title("Full Dataset — Raw Feature Value Ranges")
-
-    finalize_and_save(fig, "feature_ranges_full.png", save, xlabel="Range (max − min)")
-
-
-# 9. Plotting: Mean Elevation by Class
-def plot_elevation_by_class(df: pd.DataFrame, save) -> None:
-    fig, ax = plt.subplots(figsize=(7, 4))
-
-    # Aggregate and plot
-    elev = df.groupby(TARGET_COL)["Elevation"].mean()
-    labels = [CLASS_NAMES[i] for i in elev.index]
-    ax.bar(labels, elev.values, color=PALETTE)
-
-    ax.set_title("Mean Elevation by Cover Type (Full Dataset)")
-    plt.xticks(rotation=25, ha="right")
-
-    finalize_and_save(
-        fig,
-        "elevation_by_class_full.png",
-        save,
-        ylabel="Mean Elevation (m)",
-        xlabel="Cover Type",
-    )
-
-
-# 10 ── Main EDA function for the full dataset ─────────────────────────────────────────────── 
-def eda_full(df: pd.DataFrame) -> None:
-    """Full-dataset exploratory data analysis
-    Parameters:
-        df (pd.DataFrame): The full dataset.
-
-    """
-    print("=" * 60)
-    print("FULL DATASET EDA")
-    print("=" * 60)
-    print(f"Shape            : {df.shape}")
-    print(f"Missing values   : {df.isnull().sum().sum()}")
-    print()
-
-    vc = df[TARGET_COL].value_counts().sort_index()
-    plot_class_distribution(df, vc, save)
-
-    plot_continuous_boxplots(df, save)
-    plot_feature_ranges(df, save)
-    plot_elevation_by_class(df, save)
+def load_full() -> pd.DataFrame:
+    if not os.path.exists(DATA_PATH):
+        print(f"[eda] {DATA_PATH} not found. Downloading from sklearn.datasets ...")
+        return download_covtype()
+    return pd.read_csv(DATA_PATH, header=None, names=FEATURE_COLS + [TARGET_COL])
 
 
 # ── Stratified sampling ──────────────────────────────────────────────────────
 def stratified_sample(df: pd.DataFrame) -> pd.DataFrame:
-
-    """
-    Proportional stratified sample targeting SAMPLE_SIZE instances.
-    train_test_split with stratify ensures each class is represented
-    according to its full-dataset frequency. Seed is fixed for reproducibility.
-    """
+    """Proportional stratified sample targeting SAMPLE_SIZE instances."""
     _, sample = train_test_split(
         df,
         test_size=SAMPLE_SIZE,
@@ -303,11 +107,80 @@ def stratified_sample(df: pd.DataFrame) -> pd.DataFrame:
     )
     return sample.reset_index(drop=True)
 
-print(stratified_sample(df).head())
+
+# ── Full-dataset EDA ──────────────────────────────────────────────────────────
+def eda_full(df: pd.DataFrame) -> None:
+    print("=" * 60)
+    print("FULL DATASET EDA")
+    print("=" * 60)
+    print(f"Shape            : {df.shape}")
+    print(f"Missing values   : {df.isnull().sum().sum()}")
+    print(f"Duplicate rows   : {df.duplicated().sum()}")
+    print()
+
+    vc = df[TARGET_COL].value_counts().sort_index()
+    pct = vc / len(df) * 100
+    print("Class distribution:")
+    for cls in range(1, 8):
+        print(f"  C{cls} ({CLASS_NAMES[cls]:<22}): {vc[cls]:>8,} instances ({pct[cls]:>6.2f}%)")
+    print()
+
+    stats = df[CONTINUOUS_COLS].describe().T
+    stats["range"] = stats["max"] - stats["min"]
+    print("Continuous feature summary:")
+    print(stats[["mean", "std", "min", "25%", "50%", "75%", "max", "range"]])
+    print()
+
+    _plot_class_distribution(df, vc)
+    _plot_continuous_boxplots(df, "continuous_boxplots_full.png", color="steelblue")
+    _plot_feature_ranges(df)
+    _plot_elevation_by_class(df)
 
 
+def _plot_class_distribution(df: pd.DataFrame, vc: pd.Series) -> None:
+    fig, ax = plt.subplots(figsize=(8, 4))
+    labels = [CLASS_NAMES[i] for i in vc.index]
+    bars = ax.bar(labels, vc.values, color=PALETTE)
+    ax.bar_label(bars, labels=[f"{v:,}" for v in vc.values], padding=3, fontsize=8)
+    ax.set(title=f"Full Dataset — Class Distribution (N={len(df):,})", ylabel="Count")
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
+    plt.xticks(rotation=25, ha="right")
+    finalize_and_save(fig, "class_dist_full.png", xlabel="Cover Type")
 
-# ── Sample EDA ───────────────────────────────────────────────────────────────
+
+def _plot_continuous_boxplots(df: pd.DataFrame, filename: str, color: str) -> None:
+    z = (df[CONTINUOUS_COLS] - df[CONTINUOUS_COLS].mean()) / df[CONTINUOUS_COLS].std()
+    fig, ax = plt.subplots(figsize=(10, 4))
+    z.boxplot(
+        ax=ax, vert=False, patch_artist=True,
+        boxprops=dict(facecolor=color, alpha=0.6),
+        medianprops=dict(color="red"),
+    )
+    ax.axvline(0, color="gray", lw=0.8, ls="--")
+    ax.set_title(f"Continuous Features (z-scored) — {filename.split('_')[2].split('.')[0].title()}")
+    finalize_and_save(fig, filename, xlabel="Standard deviations from mean")
+
+
+def _plot_feature_ranges(df: pd.DataFrame) -> None:
+    fig, ax = plt.subplots(figsize=(8, 4))
+    (df[CONTINUOUS_COLS].max() - df[CONTINUOUS_COLS].min()).plot(
+        kind="barh", ax=ax, color="steelblue", alpha=0.7
+    )
+    ax.set_title("Full Dataset — Raw Feature Value Ranges")
+    finalize_and_save(fig, "feature_ranges_full.png", xlabel="Range (max − min)")
+
+
+def _plot_elevation_by_class(df: pd.DataFrame) -> None:
+    fig, ax = plt.subplots(figsize=(7, 4))
+    elev = df.groupby(TARGET_COL)["Elevation"].mean()
+    ax.bar([CLASS_NAMES[i] for i in elev.index], elev.values, color=PALETTE)
+    ax.set_title("Mean Elevation by Cover Type (Full Dataset)")
+    plt.xticks(rotation=25, ha="right")
+    finalize_and_save(fig, "elevation_by_class_full.png",
+                      ylabel="Mean Elevation (m)", xlabel="Cover Type")
+
+
+# ── Sample EDA ────────────────────────────────────────────────────────────────
 def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
     print("=" * 60)
     print("SAMPLED DATASET EDA")
@@ -331,7 +204,6 @@ def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
               f"{vc_sample[cls]:>9,} {pct_sample[cls]:>9.2f}%")
     print()
 
-    # continuous stats comparison
     cont_full   = full[CONTINUOUS_COLS].describe().T
     cont_sample = sample[CONTINUOUS_COLS].describe().T
     print("Continuous feature mean ± std (full vs sample):")
@@ -341,11 +213,11 @@ def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
               f"sample: {cont_sample.loc[col,'mean']:8.1f} ± {cont_sample.loc[col,'std']:6.1f}")
     print()
 
-    # figure: side-by-side class distribution
+    # side-by-side class distribution
     x = np.arange(7)
     w = 0.35
     fig, ax = plt.subplots(figsize=(9, 4))
-    ax.bar(x - w/2, pct_full.values,   w, label="Full (581,012)",    color="steelblue",  alpha=0.8)
+    ax.bar(x - w/2, pct_full.values,   w, label="Full (581,012)",         color="steelblue",  alpha=0.8)
     ax.bar(x + w/2, pct_sample.values, w, label=f"Sample ({SAMPLE_SIZE:,})", color="darkorange", alpha=0.8)
     ax.set_xticks(x)
     ax.set_xticklabels([f"C{i}\n{CLASS_NAMES[i]}" for i in range(1, 8)], fontsize=8)
@@ -355,19 +227,9 @@ def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
     plt.tight_layout()
     save(fig, "class_dist_comparison.png")
 
-    # figure: z-scored boxplots of sample continuous features
-    z = (sample[CONTINUOUS_COLS] - sample[CONTINUOUS_COLS].mean()) / sample[CONTINUOUS_COLS].std()
-    fig, ax = plt.subplots(figsize=(10, 4))
-    z.boxplot(ax=ax, vert=False, patch_artist=True,
-              boxprops=dict(facecolor="darkorange", alpha=0.6),
-              medianprops=dict(color="red"))
-    ax.set_title(f"Sampled Dataset — Continuous Features (z-scored, N={SAMPLE_SIZE:,})")
-    ax.set_xlabel("Standard deviations from mean")
-    ax.axvline(0, color="gray", lw=0.8, ls="--")
-    plt.tight_layout()
-    save(fig, "continuous_boxplots_sample.png")
+    _plot_continuous_boxplots(sample, "continuous_boxplots_sample.png", color="darkorange")
 
-    # figure: per-class normalised feature means heatmap
+    # per-class normalised feature means heatmap
     class_means = sample.groupby(TARGET_COL)[CONTINUOUS_COLS].mean()
     norm = (class_means - class_means.min()) / (class_means.max() - class_means.min())
     fig, ax = plt.subplots(figsize=(11, 4))
@@ -381,7 +243,7 @@ def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
     plt.tight_layout()
     save(fig, "per_class_feature_heatmap_sample.png")
 
-    # figure: wilderness area prevalence per class
+    # wilderness area prevalence per class
     fig, axes = plt.subplots(1, 4, figsize=(12, 3), sharey=False)
     for i, col in enumerate(WILDERNESS_COLS):
         pct = sample.groupby(TARGET_COL)[col].mean() * 100
@@ -394,7 +256,7 @@ def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
     plt.tight_layout()
     save(fig, "wilderness_by_class_sample.png")
 
-    # figure: soil type sparsity
+    # soil type sparsity
     soil_pct = sample[SOIL_COLS].mean() * 100
     fig, ax = plt.subplots(figsize=(12, 3))
     ax.bar(range(40), soil_pct.values, color="slategray", alpha=0.7)
@@ -405,9 +267,7 @@ def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
     plt.tight_layout()
     save(fig, "soil_type_prevalence_sample.png")
 
-    palette = [plt.cm.tab10(i / 10) for i in range(7)]
-
-    # figure: correlation heatmap of continuous features
+    # correlation heatmap
     corr = sample[CONTINUOUS_COLS].corr()
     mask = np.triu(np.ones_like(corr, dtype=bool))
     fig, ax = plt.subplots(figsize=(9, 7))
@@ -425,26 +285,7 @@ def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
     plt.tight_layout()
     save(fig, "correlation_heatmap_sample.png")
 
-    # figure: violin plots for top discriminating continuous features
-    top_features = ["Elevation", "Slope", "Hillshade_Noon", "Horizontal_Distance_To_Roadways"]
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-    for ax, feat in zip(axes.flat, top_features):
-        groups = [sample.loc[sample[TARGET_COL] == cls, feat].values for cls in range(1, 8)]
-        parts = ax.violinplot(groups, positions=range(1, 8), showmedians=True)
-        for i, pc in enumerate(parts["bodies"]):
-            pc.set_facecolor(palette[i])
-            pc.set_alpha(0.7)
-        ax.set_xticks(range(1, 8))
-        ax.set_xticklabels([CLASS_NAMES[i] for i in range(1, 8)],
-                           rotation=30, ha="right", fontsize=7)
-        ax.set_xlabel("Cover Type")
-        ax.set_ylabel(feat)
-        ax.set_title(f"{feat} by Cover Type")
-    fig.suptitle("Feature Distributions by Cover Type (Sample)", fontsize=12, y=1.01)
-    plt.tight_layout()
-    save(fig, "violin_top_features_sample.png")
-
-    # figure: mutual information scores for all features
+    # mutual information scores — computed first so violin plots use top-4 by MI
     discrete_mask = (
         [False] * len(CONTINUOUS_COLS)
         + [True] * (len(WILDERNESS_COLS) + len(SOIL_COLS))
@@ -454,7 +295,31 @@ def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
         discrete_features=discrete_mask,
         random_state=RANDOM_SEED,
     )
-    mi_series = pd.Series(mi, index=FEATURE_COLS).sort_values(ascending=True)
+    mi_series = pd.Series(mi, index=FEATURE_COLS).sort_values(ascending=False)
+
+    # top 4 continuous features by MI — drives violin plots (matches report Fig 2 caption)
+    top_cont_mi = [f for f in mi_series.index if f in CONTINUOUS_COLS][:4]
+    print(f"  Top 4 continuous features by MI: {top_cont_mi}")
+
+    # violin plots for top-4 MI-ranked continuous features
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    for ax, feat in zip(axes.flat, top_cont_mi):
+        groups = [sample.loc[sample[TARGET_COL] == cls, feat].values for cls in range(1, 8)]
+        parts = ax.violinplot(groups, positions=range(1, 8), showmedians=True)
+        for i, pc in enumerate(parts["bodies"]):
+            pc.set_facecolor(PALETTE[i])
+            pc.set_alpha(0.7)
+        ax.set_xticks(range(1, 8))
+        ax.set_xticklabels([CLASS_NAMES[i] for i in range(1, 8)], rotation=30, ha="right", fontsize=7)
+        ax.set_xlabel("Cover Type")
+        ax.set_ylabel(feat)
+        ax.set_title(f"{feat} by Cover Type")
+    fig.suptitle("Feature Distributions by Cover Type (Sample) — Top 4 by Mutual Information",
+                 fontsize=11, y=1.01)
+    plt.tight_layout()
+    save(fig, "violin_top_features_sample.png")
+
+    mi_series = mi_series.sort_values(ascending=True)
     top_mi = mi_series.tail(20)
     bar_colors = [
         "steelblue"  if f in CONTINUOUS_COLS else
@@ -475,7 +340,7 @@ def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
     save(fig, "mutual_information_top20_sample.png")
 
 
-# ── Preprocessing notes ──────────────────────────────────────────────────────
+# ── Preprocessing notes ───────────────────────────────────────────────────────
 def print_preprocessing_notes(sample: pd.DataFrame) -> None:
     print("=" * 60)
     print("PREPROCESSING & IMBALANCE NOTES")
@@ -499,19 +364,13 @@ def print_preprocessing_notes(sample: pd.DataFrame) -> None:
           f"{len(SOIL_COLS)} soil-type binary  (total {len(FEATURE_COLS)})")
 
 
-# ── Justification & leakage debug ────────────────────────────────────────────
+# ── Justification & leakage debug ─────────────────────────────────────────────
 def sanity_and_justification(full: pd.DataFrame, sample: pd.DataFrame) -> None:
-    """
-    Three-part output required by the assignment:
-      1. Sampling strategy justification
-      2. Metric choice justification (Macro F1 vs Accuracy)
-      3. Leakage / evaluation debug (dummy baseline + shuffled-label + split integrity)
-    """
     print("=" * 60)
     print("JUSTIFICATION & LEAKAGE DEBUG")
     print("=" * 60)
 
-    # ── 1. Sampling strategy ──────────────────────────────────────────────
+    # 1. Sampling strategy
     print("1. Sampling strategy justification")
     print(f"   Method  : Proportional stratified sample (n={SAMPLE_SIZE:,}, seed={RANDOM_SEED})")
     print(f"   Why n={SAMPLE_SIZE:,}: balances runtime (<2 min/fold for kNN/SVM) with "
@@ -525,7 +384,7 @@ def sanity_and_justification(full: pd.DataFrame, sample: pd.DataFrame) -> None:
           "stratification successful.")
     print()
 
-    # ── 2. Metric choice justification ───────────────────────────────────
+    # 2. Metric choice
     print("2. Metric choice justification (Macro F1 > Accuracy for Covertype)")
     X = sample[FEATURE_COLS].values
     y = sample[TARGET_COL].values
@@ -547,10 +406,9 @@ def sanity_and_justification(full: pd.DataFrame, sample: pd.DataFrame) -> None:
     print(f"   => Macro F1 is the primary metric; accuracy is reported but not optimised.")
     print()
 
-    # ── 3. Leakage debug ────────────────────────────────────────────────
+    # 3. Leakage debug
     print("3. Leakage / evaluation debug")
 
-    # 3a. Shuffled-label baseline (performance must collapse)
     rng = np.random.default_rng(RANDOM_SEED)
     y_tr_shuf = rng.permutation(y_tr)
     dummy_st  = DummyClassifier(strategy="stratified", random_state=RANDOM_SEED)
@@ -560,22 +418,19 @@ def sanity_and_justification(full: pd.DataFrame, sample: pd.DataFrame) -> None:
     print(f"   Shuffled-label baseline Macro F1 : {f1_st:.4f}  "
           f"(near-chance — confirms no label leakage can explain real results)")
 
-    # 3b. Split integrity: no index overlap between train and test
     overlap = len(set(tr_idx.tolist()) & set(te_idx.tolist()))
     print(f"   Split integrity : {len(tr_idx):,} train + {len(te_idx):,} test, "
           f"overlapping indices = {overlap}  "
           f"({'OK' if overlap == 0 else 'WARNING: OVERLAP FOUND'})")
 
-    # 3c. Sample vs full-dataset row overlap check (sampling leakage)
     sample_dupes = sample.duplicated().sum()
     print(f"   Duplicate rows in sample : {sample_dupes}  "
           f"({'OK' if sample_dupes == 0 else 'WARNING'})")
     print()
 
-    # Figure: Accuracy vs Macro F1 for baselines
-    labels   = ["Dummy\n(most_frequent)", "Shuffled\n(stratified)"]
-    accs     = [acc_mf,  accuracy_score(y_te, y_st)]
-    f1s      = [f1_mf,   f1_st]
+    labels = ["Dummy\n(most_frequent)", "Shuffled\n(stratified)"]
+    accs   = [acc_mf, accuracy_score(y_te, y_st)]
+    f1s    = [f1_mf,  f1_st]
     x = np.arange(2)
     w = 0.35
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -592,7 +447,7 @@ def sanity_and_justification(full: pd.DataFrame, sample: pd.DataFrame) -> None:
     save(fig, "leakage_debug_baselines.png")
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ensure_dir(OUT_DIR)
     ensure_dir(os.path.dirname(SAMPLE_PATH))
@@ -613,14 +468,7 @@ def main() -> None:
     sanity_and_justification(full, sample)
 
     print(f"\nAll figures saved to {os.path.abspath(OUT_DIR)}/")
-    if os.environ.get("EDA_SHOW"):
-        # Block at the end so interactive figure windows stay open.
-        plt.show()
 
 
 if __name__ == "__main__":
     main()
-
-
-
-# %%

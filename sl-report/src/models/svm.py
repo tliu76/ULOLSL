@@ -20,7 +20,7 @@ from utils import (
 )
 
 C_GRID_COARSE  = [0.001, 0.01, 0.1, 1, 10, 100]
-GAMMA_GRID     = [0.0001, 0.001, 0.01, 0.1, 1.0]
+GAMMA_GRID     = [0.0001, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0]
 
 
 def _cv_both(est, X, y):
@@ -58,7 +58,7 @@ def run_svm(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
     lin_tr_scores = []   # training — for plotting only
     for c in C_GRID_COARSE:
         est = LinearSVC(C=c, class_weight="balanced",
-                        max_iter=5000, random_state=RANDOM_SEED)
+                        max_iter=20000, random_state=RANDOM_SEED)
         val_s, trn_s = _cv_both(est, X_train, y_train)
         lin_scores.append(val_s)
         lin_tr_scores.append(trn_s)
@@ -68,7 +68,7 @@ def run_svm(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
     print(f"  Linear best C={best_c_lin}  CV F1={max(lin_scores):.4f}")
 
     final_lin = LinearSVC(C=best_c_lin, class_weight="balanced",
-                          max_iter=5000, random_state=RANDOM_SEED)
+                          max_iter=20000, random_state=RANDOM_SEED)
     t0 = time.perf_counter()
     final_lin.fit(X_train, y_train)
     fit_t_lin = time.perf_counter() - t0
@@ -156,7 +156,7 @@ def run_svm(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
     for ax, est, lbl, clr in [
         (axes[0], LinearSVC(C=best_c_lin, class_weight="balanced",
-                            max_iter=5000, random_state=RANDOM_SEED), "Linear", "#4C72B0"),
+                            max_iter=20000, random_state=RANDOM_SEED), "Linear", "#4C72B0"),
         (axes[1], SVC(C=best_c_rbf, gamma=best_g_rbf, kernel="rbf",
                       class_weight="balanced", random_state=RANDOM_SEED,
                       cache_size=1000), "RBF", "#DD8452"),
