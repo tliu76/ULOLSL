@@ -13,11 +13,13 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")
+# matplotlib.use("Agg")
+matplotlib.use("MacOSX")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.patches import Patch
 from sklearn.model_selection import train_test_split
+from sklearn.datasets import fetch_covtype
 from sklearn.feature_selection import mutual_info_classif
 from sklearn.dummy import DummyClassifier
 from sklearn.metrics import accuracy_score, f1_score
@@ -47,8 +49,9 @@ def ensure_dir(path: str) -> None:
 def save(fig: plt.Figure, name: str) -> None:
     fig.savefig(os.path.join(OUT_DIR, name), dpi=150, bbox_inches="tight")
     if os.environ.get("EDA_SHOW"):
-        plt.show()
-    plt.close(fig)
+        fig.show()
+    else:
+        plt.close(fig)
 
 
 
@@ -81,12 +84,6 @@ print(info)
 ### Given is the attribute name, attribute type, the measurement unit and a brief description.
 
 
-
-### Loading the full dataset. ###
-df = load_full()
-print(df.head())
-
-
 # Names from covtype.info
 CONTINUOUS_COLS = [
     "Elevation", "Aspect", "Slope",
@@ -109,6 +106,13 @@ CLASS_NAMES = {
     6: "Douglas-fir",
     7: "Krummholz",
 }
+
+
+### Loading the full dataset. ###
+df = load_full()
+df.info()
+
+print(df.head())
 
 
 # ── 1. Full-dataset Exploratory Data Analysis ─────────────────────────────────────────────── 
@@ -177,14 +181,88 @@ def finalize_and_save(fig, filename, save, xlabel=None, ylabel=None):
         plt.ylabel(ylabel)
     plt.tight_layout()
     save(fig, filename)
-    plt.close(fig)
 
 # 6. Plotting: Class Distribution
+def plot_class_distribution(vc: pd.Series, save) -> None:
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.bar(vc.index, vc.values, color=PALETTE, alpha=0.8)
+    ax.set_xticks(vc.index)
+    ax.set_xticklabels([f"C{cls}\n{CLASS_NAMES[cls]}" for cls in vc.index], rotation=30, ha="right")
+    ax.set_title("Class Distribution (Full Dataset)")
+    finalize_and_save(fig, "class_distribution_full.png", save)
+
+# 6. Plotting: Class Distribution
+def plot_class_distribution(df: pd.DataFrame, vc: pd.Series, save) -> None:
+    fig, ax = plt.subplots(figsize=(8, 4))
+
+    # Map numeric class IDs directly to their human-readable names
+    labels = [CLASS_NAMES[i] for i in vc.index]
+    bars = ax.bar(labels, vc.values, color=PALETTE)
+
+    # Automatically label bars with thousands separator
+    ax.bar_label(bars, labels=[f"{v:,}" for v in vc.values], padding=3, fontsize=8)
+    ax.set(title=f"Full Dataset — Class Distribution (N={len(df):,})", ylabel="Count")
+    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
+
+    plt.xticks(rotation=25, ha="right")
+    finalize_and_save(fig, "class_dist_full.png", save, xlabel="Cover Type")
 
 
-# ── Section Name ────────────────────────────────────────────────────────
-# ── Section Name ────────────────────────────────────────────────────────
-# ── Section Name ────────────────────────────────────────────────────────
+# 7. Plotting: Continuous Variables Z-Score Boxplots
+def plot_continuous_boxplots(df: pd.DataFrame, save) -> None:
+    # Vectorized Z-score calculation
+    z = (df[CONTINUOUS_COLS] - df[CONTINUOUS_COLS].mean()) / df[CONTINUOUS_COLS].std()
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    # Lean pandas boxplot integration
+    z.boxplot(
+        ax=ax,
+        vert=False,
+        patch_artist=True,
+        boxprops=dict(facecolor="steelblue", alpha=0.6),
+        medianprops=dict(color="red"),
+    )
+    ax.axvline(0, color="gray", lw=0.8, ls="--")
+    ax.set_title("Full Dataset — Continuous Features (z-scored)")
+
+    finalize_and_save(
+        fig,
+        "continuous_boxplots_full.png",
+        save,
+        xlabel="Standard deviations from mean",
+    )
+# 8. Plotting: Raw Feature Value Ranges
+def plot_feature_ranges(df: pd.DataFrame, save) -> None:
+    fig, ax = plt.subplots(figsize=(8, 4))
+
+    # Clean one-liner calculation and pandas horizontal bar plot
+    (df[CONTINUOUS_COLS].max() - df[CONTINUOUS_COLS].min()).plot(
+        kind="barh", ax=ax, color="steelblue", alpha=0.7
+    )
+    ax.set_title("Full Dataset — Raw Feature Value Ranges")
+
+    finalize_and_save(fig, "feature_ranges_full.png", save, xlabel="Range (max − min)")
+
+
+# 9. Plotting: Mean Elevation by Class
+def plot_elevation_by_class(df: pd.DataFrame, save) -> None:
+    fig, ax = plt.subplots(figsize=(7, 4))
+
+    # Aggregate and plot
+    elev = df.groupby(TARGET_COL)["Elevation"].mean()
+    labels = [CLASS_NAMES[i] for i in elev.index]
+    ax.bar(labels, elev.values, color=PALETTE)
+
+    ax.set_title("Mean Elevation by Cover Type (Full Dataset)")
+    plt.xticks(rotation=25, ha="right")
+
+    finalize_and_save(
+        fig,
+        "elevation_by_class_full.png",
+        save,
+        ylabel="Mean Elevation (m)",
+        xlabel="Cover Type",
+    )
 
 
 # 10 ── Main EDA function for the full dataset ─────────────────────────────────────────────── 
@@ -194,9 +272,19 @@ def eda_full(df: pd.DataFrame) -> None:
         df (pd.DataFrame): The full dataset.
 
     """
+    print("=" * 60)
+    print("FULL DATASET EDA")
+    print("=" * 60)
+    print(f"Shape            : {df.shape}")
+    print(f"Missing values   : {df.isnull().sum().sum()}")
+    print()
 
+    vc = df[TARGET_COL].value_counts().sort_index()
+    plot_class_distribution(df, vc, save)
 
-
+    plot_continuous_boxplots(df, save)
+    plot_feature_ranges(df, save)
+    plot_elevation_by_class(df, save)
 
 
 # ── Stratified sampling ──────────────────────────────────────────────────────
@@ -214,6 +302,9 @@ def stratified_sample(df: pd.DataFrame) -> pd.DataFrame:
         stratify=df[TARGET_COL],
     )
     return sample.reset_index(drop=True)
+
+print(stratified_sample(df).head())
+
 
 
 # ── Sample EDA ───────────────────────────────────────────────────────────────
@@ -522,6 +613,9 @@ def main() -> None:
     sanity_and_justification(full, sample)
 
     print(f"\nAll figures saved to {os.path.abspath(OUT_DIR)}/")
+    if os.environ.get("EDA_SHOW"):
+        # Block at the end so interactive figure windows stay open.
+        plt.show()
 
 
 if __name__ == "__main__":
