@@ -6,7 +6,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.svm import SVC, LinearSVC
-from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.model_selection import StratifiedKFold, cross_val_score, cross_validate
 from sklearn.preprocessing import StandardScaler
 
 import sys, os
@@ -26,6 +26,14 @@ GAMMA_GRID     = [0.0001, 0.001, 0.01, 0.1, 1.0]
 def _cv_mean(est, X, y) -> float:
     cv = StratifiedKFold(n_splits=N_CV, shuffle=True, random_state=RANDOM_SEED)
     return cross_val_score(est, X, y, cv=cv, scoring=SCORING, n_jobs=-1).mean()
+
+
+def _cv_both(est, X, y):
+    """Return (mean_val_score, mean_train_score) in one CV pass."""
+    cv = StratifiedKFold(n_splits=N_CV, shuffle=True, random_state=RANDOM_SEED)
+    res = cross_validate(est, X, y, cv=cv, scoring=SCORING,
+                         return_train_score=True, n_jobs=-1)
+    return res["test_score"].mean(), res["train_score"].mean()
 
 
 def run_svm(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
@@ -51,11 +59,14 @@ def run_svm(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
 
     # ── Linear SVM ────────────────────────────────────────────────────────
     print("  Linear SVM: C grid search ...")
-    lin_scores = []
+    lin_scores    = []   # validation (CV) — used for selection
+    lin_tr_scores = []   # training — for plotting only
     for c in C_GRID_COARSE:
         est = LinearSVC(C=c, class_weight="balanced",
                         max_iter=5000, random_state=RANDOM_SEED)
-        lin_scores.append(_cv_mean(est, X_train, y_train))
+        val_s, trn_s = _cv_both(est, X_train, y_train)
+        lin_scores.append(val_s)
+        lin_tr_scores.append(trn_s)
         print(f"    C={c}  CV Macro F1={lin_scores[-1]:.4f}")
 
     best_c_lin = C_GRID_COARSE[int(np.argmax(lin_scores))]
@@ -76,23 +87,29 @@ def run_svm(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
 
     # ── RBF SVM: coarse-to-fine ───────────────────────────────────────────
     print("  RBF SVM: C grid (step 1) ...")
-    rbf_c_scores = []
+    rbf_c_scores    = []   # validation (CV) — used for selection
+    rbf_c_tr_scores = []   # training — for plotting only
     for c in C_GRID_COARSE:
         est = SVC(C=c, kernel="rbf", class_weight="balanced",
                   random_state=RANDOM_SEED, cache_size=1000)
-        rbf_c_scores.append(_cv_mean(est, X_train, y_train))
+        val_s, trn_s = _cv_both(est, X_train, y_train)
+        rbf_c_scores.append(val_s)
+        rbf_c_tr_scores.append(trn_s)
         print(f"    C={c}  CV Macro F1={rbf_c_scores[-1]:.4f}")
 
     best_c_rbf = C_GRID_COARSE[int(np.argmax(rbf_c_scores))]
     print(f"  RBF best C={best_c_rbf}")
 
     print("  RBF SVM: gamma grid (step 2) ...")
-    rbf_g_scores = []
+    rbf_g_scores    = []   # validation (CV) — used for selection
+    rbf_g_tr_scores = []   # training — for plotting only
     for g in GAMMA_GRID:
         est = SVC(C=best_c_rbf, gamma=g, kernel="rbf",
                   class_weight="balanced", random_state=RANDOM_SEED,
                   cache_size=1000)
-        rbf_g_scores.append(_cv_mean(est, X_train, y_train))
+        val_s, trn_s = _cv_both(est, X_train, y_train)
+        rbf_g_scores.append(val_s)
+        rbf_g_tr_scores.append(trn_s)
         print(f"    gamma={g}  CV Macro F1={rbf_g_scores[-1]:.4f}")
 
     best_g_rbf = GAMMA_GRID[int(np.argmax(rbf_g_scores))]
@@ -114,24 +131,27 @@ def run_svm(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
 
     # ── Figure 1: Kernel comparison (C sweep) ─────────────────────────────
     fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(C_GRID_COARSE, lin_scores,   "o-",  label="Linear SVM", color="#4C72B0")
-    ax.plot(C_GRID_COARSE, rbf_c_scores, "s--", label="RBF SVM",    color="#DD8452")
+    ax.plot(C_GRID_COARSE, lin_tr_scores,  "o--", label="Linear Train",      color="#4C72B0", alpha=0.6)
+    ax.plot(C_GRID_COARSE, lin_scores,     "o-",  label="Linear Validation",  color="#4C72B0")
+    ax.plot(C_GRID_COARSE, rbf_c_tr_scores,"s--", label="RBF Train",          color="#DD8452", alpha=0.6)
+    ax.plot(C_GRID_COARSE, rbf_c_scores,   "s-",  label="RBF Validation",     color="#DD8452")
     ax.set_xscale("log")
     ax.set_xlabel("C (log scale)")
-    ax.set_ylabel("CV Macro F1")
+    ax.set_ylabel("Macro F1")
     ax.set_title(f"SVM — Kernel Comparison (C sweep) [{tag}]")
-    ax.legend()
+    ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     save_fig(fig, f"svm_{tag}_kernel_compare.png")
 
     # ── Figure 2: RBF gamma complexity ────────────────────────────────────
     fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(GAMMA_GRID, rbf_g_scores, "o-", color="#DD8452", ms=6)
+    ax.plot(GAMMA_GRID, rbf_g_tr_scores, "s--", color="#55A868", ms=6, label="Train")
+    ax.plot(GAMMA_GRID, rbf_g_scores,    "o-",  color="#DD8452", ms=6, label="Validation (CV)")
     ax.axvline(best_g_rbf, color="red", ls="--", lw=1.2,
                label=f"opt γ={best_g_rbf}")
     ax.set_xscale("log")
     ax.set_xlabel("gamma (log scale)")
-    ax.set_ylabel("CV Macro F1")
+    ax.set_ylabel("Macro F1")
     ax.set_title(f"SVM RBF — Gamma Complexity Curve [{tag}]")
     ax.legend()
     ax.grid(alpha=0.3)

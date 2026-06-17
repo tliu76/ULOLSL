@@ -10,7 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.neural_network import MLPClassifier
-from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.model_selection import StratifiedKFold, cross_val_score, cross_validate
 from sklearn.metrics import f1_score
 from sklearn.preprocessing import StandardScaler
 
@@ -49,6 +49,14 @@ PT_PATIENCE = 20
 def _cv_mean(est, X, y) -> float:
     cv = StratifiedKFold(n_splits=N_CV, shuffle=True, random_state=RANDOM_SEED)
     return cross_val_score(est, X, y, cv=cv, scoring=SCORING, n_jobs=-1).mean()
+
+
+def _cv_both(est, X, y):
+    """Return (mean_val_score, mean_train_score) in one CV pass."""
+    cv = StratifiedKFold(n_splits=N_CV, shuffle=True, random_state=RANDOM_SEED)
+    res = cross_validate(est, X, y, cv=cv, scoring=SCORING,
+                         return_train_score=True, n_jobs=-1)
+    return res["test_score"].mean(), res["train_score"].mean()
 
 
 # ── Sklearn MLP ───────────────────────────────────────────────────────────────
@@ -136,37 +144,48 @@ def run_nn_sklearn(X_train, y_train, X_test, y_test, tag: str = "covertype") -> 
     print(f"  Hyperparams: solver=SGD, momentum=0, lr={best_lr}, alpha={best_alpha}, "
           f"early_stopping=True, n_iter_no_change=20, validation_fraction=0.1")
 
-    # Figure 1: Epoch loss curve
+    # Figure 1: Epoch loss curve (dual y-axis: train loss left, val F1 right)
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.plot(final.loss_curve_, color="#4C72B0", label="Train loss")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Train loss", color="#4C72B0")
+    ax.tick_params(axis="y", colors="#4C72B0")
+    ax.set_title(f"NN (sklearn SGD) — Epoch Curve [{tag}]")
     if hasattr(final, "validation_scores_") and final.validation_scores_ is not None:
         ax2 = ax.twinx()
         ax2.plot(final.validation_scores_, color="#DD8452", ls="--", label="Val Macro F1")
         ax2.set_ylabel("Val Macro F1", color="#DD8452")
         ax2.tick_params(axis="y", colors="#DD8452")
-    ax.set_xlabel("Epoch")
-    ax.set_ylabel("Train loss")
-    ax.set_title(f"NN (sklearn SGD) — Epoch Curve [{tag}]")
-    ax.legend(loc="upper right")
+        # combine handles from both axes so both labels appear in legend
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
+    else:
+        ax.legend(loc="upper right")
     ax.grid(alpha=0.3)
     save_fig(fig, f"nn_sklearn_{tag}_epoch.png")
 
     # Figure 2: Width complexity
     print("  Width complexity study ...")
-    width_cv = []
+    width_val = []   # validation (CV)
+    width_trn = []   # training
     for w in WIDTH_GRID:
         est = MLPClassifier(hidden_layer_sizes=(w,), solver="sgd",
                             momentum=0.0, nesterovs_momentum=False,
                             learning_rate_init=best_lr, alpha=best_alpha,
                             max_iter=300, early_stopping=True, n_iter_no_change=20,
                             random_state=RANDOM_SEED)
-        width_cv.append(_cv_mean(est, X_train, y_train))
+        val_s, trn_s = _cv_both(est, X_train, y_train)
+        width_val.append(val_s)
+        width_trn.append(trn_s)
 
     fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(WIDTH_GRID, width_cv, "o-", color="#4C72B0", ms=6)
+    ax.plot(WIDTH_GRID, width_trn, "s--", color="#55A868", ms=6, label="Train")
+    ax.plot(WIDTH_GRID, width_val, "o-",  color="#4C72B0", ms=6, label="Validation (CV)")
     ax.set_xlabel("Hidden layer width")
-    ax.set_ylabel("CV Macro F1")
+    ax.set_ylabel("Macro F1")
     ax.set_title(f"NN (sklearn) — Width Complexity [{tag}]")
+    ax.legend()
     ax.grid(alpha=0.3)
     save_fig(fig, f"nn_sklearn_{tag}_width.png")
 
@@ -356,35 +375,45 @@ def run_nn_pytorch(X_train, y_train, X_test, y_test, tag: str = "covertype") -> 
     print(f"  Test Macro F1={metrics['macro_f1']:.4f}  Acc={metrics['accuracy']:.4f}  "
           f"Epochs={stop_ep}  Fit={fit_t:.2f}s")
 
-    # Figure 1: Epoch curve
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
-    ax1.plot(history["loss"], color="#4C72B0")
-    ax1.axvline(stop_ep - 1, color="green", ls="--", lw=1, label=f"stop={stop_ep}")
-    ax1.set_xlabel("Epoch"); ax1.set_ylabel("Train loss")
-    ax1.set_title(f"PyTorch NN — Train Loss [{tag}]")
-    ax1.legend(); ax1.grid(alpha=0.3)
-    ax2.plot(history["val_f1"], color="#DD8452")
-    ax2.axvline(stop_ep - 1, color="green", ls="--", lw=1)
-    ax2.set_xlabel("Epoch"); ax2.set_ylabel("Val Macro F1")
-    ax2.set_title(f"PyTorch NN — Val F1 [{tag}]")
-    ax2.grid(alpha=0.3)
+    # Figure 1: Epoch curve (dual y-axis: train loss left, val F1 right)
+    fig, ax1 = plt.subplots(figsize=(8, 4))
+    ax1.plot(history["loss"], color="#4C72B0", label="Train loss")
+    ax1.axvline(stop_ep - 1, color="green", ls="--", lw=1.2, label=f"Early stop (ep={stop_ep})")
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Train loss", color="#4C72B0")
+    ax1.tick_params(axis="y", colors="#4C72B0")
+    ax1.set_title(f"PyTorch NN — Epoch Curve [{tag}]")
+    ax2 = ax1.twinx()
+    ax2.plot(history["val_f1"], color="#DD8452", ls="--", label="Val Macro F1")
+    ax2.set_ylabel("Val Macro F1", color="#DD8452")
+    ax2.tick_params(axis="y", colors="#DD8452")
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="center right")
+    ax1.grid(alpha=0.3)
     fig.tight_layout()
     save_fig(fig, f"nn_pytorch_{tag}_epoch.png")
 
     # Figure 2: Width complexity (50 epochs per candidate)
     print("  Width complexity study ...")
-    width_f1 = []
+    width_val_f1 = []   # validation F1
+    width_trn_f1 = []   # training F1
     for w in WIDTH_GRID:
         m = MLP(n_feats, w, n_cls)
         m, _, _ = train_model(m, loader_tr, loader_val, 50, PT_LR, PT_WD, 10)
-        preds = predict_all(m, X_val)
-        width_f1.append(f1_score(y_val, preds, average="macro", zero_division=0))
-        print(f"    w={w}  val Macro F1={width_f1[-1]:.4f}")
+        val_preds = predict_all(m, X_val)
+        trn_preds = predict_all(m, X_tr2)
+        width_val_f1.append(f1_score(y_val,  val_preds, average="macro", zero_division=0))
+        width_trn_f1.append(f1_score(y_tr2,  trn_preds, average="macro", zero_division=0))
+        print(f"    w={w}  val Macro F1={width_val_f1[-1]:.4f}  train Macro F1={width_trn_f1[-1]:.4f}")
 
     fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(WIDTH_GRID, width_f1, "o-", color="#DD8452", ms=6)
-    ax.set_xlabel("Hidden layer width"); ax.set_ylabel("Val Macro F1")
+    ax.plot(WIDTH_GRID, width_trn_f1, "s--", color="#55A868", ms=6, label="Train")
+    ax.plot(WIDTH_GRID, width_val_f1, "o-",  color="#DD8452", ms=6, label="Validation")
+    ax.set_xlabel("Hidden layer width")
+    ax.set_ylabel("Macro F1")
     ax.set_title(f"PyTorch NN — Width Complexity [{tag}]")
+    ax.legend()
     ax.grid(alpha=0.3)
     save_fig(fig, f"nn_pytorch_{tag}_width.png")
 

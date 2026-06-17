@@ -98,18 +98,18 @@ def run_knn(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
           f"Fit={fit_t:.3f}s  Pred={pred_t:.3f}s")
 
     # ── Figure 1: Complexity – k ──────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(K_CANDIDATES, k_scores, "o-", color="#4C72B0", ms=6)
-    ax.axvline(best_k, color="red", ls="--", lw=1.2, label=f"opt k={best_k}")
-    # train score at each k (self-neighbor artifact for k=1)
+    # Train score at each k (k=1 gives 1.0 due to self-neighbor — expected overfitting artifact)
     train_k_scores = []
     for k in K_CANDIDATES:
         est = KNeighborsClassifier(n_neighbors=k, n_jobs=-1)
         est.fit(X_train, y_train)
         train_k_scores.append(f1_score(y_train, est.predict(X_train),
                                        average="macro", zero_division=0))
+    fig, ax = plt.subplots(figsize=(7, 4))
     ax.plot(K_CANDIDATES, train_k_scores, "s--", color="#55A868", ms=5,
-            alpha=0.7, label="Train Macro F1")
+            alpha=0.7, label="Train")
+    ax.plot(K_CANDIDATES, k_scores, "o-", color="#4C72B0", ms=6, label="Validation (CV)")
+    ax.axvline(best_k, color="red", ls="--", lw=1.2, label=f"opt k={best_k}")
     ax.set_xlabel("k (number of neighbours)")
     ax.set_ylabel("Macro F1")
     ax.set_title(f"kNN — k Complexity Curve [{tag}]")

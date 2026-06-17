@@ -6,7 +6,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.model_selection import StratifiedKFold, cross_val_score, cross_validate
 from sklearn.metrics import f1_score
 
 import sys, os
@@ -23,6 +23,14 @@ from utils import (
 def _cv_mean(est, X, y) -> float:
     cv = StratifiedKFold(n_splits=N_CV, shuffle=True, random_state=RANDOM_SEED)
     return cross_val_score(est, X, y, cv=cv, scoring=SCORING, n_jobs=-1).mean()
+
+
+def _cv_both(est, X, y):
+    """Return (mean_val_score, mean_train_score) in one CV pass."""
+    cv = StratifiedKFold(n_splits=N_CV, shuffle=True, random_state=RANDOM_SEED)
+    res = cross_validate(est, X, y, cv=cv, scoring=SCORING,
+                         return_train_score=True, n_jobs=-1)
+    return res["test_score"].mean(), res["train_score"].mean()
 
 
 def run_dt(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
@@ -71,13 +79,16 @@ def run_dt(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
         idx    = np.round(np.linspace(0, len(alphas) - 1, 25)).astype(int)
         alphas = alphas[idx]
 
-    alpha_scores = []
+    alpha_scores = []      # validation (CV) scores — used for selection
+    alpha_tr_scores = []   # training scores — for plotting only
     for a in alphas:
         est = DecisionTreeClassifier(
             criterion=best_criterion,
             ccp_alpha=a, class_weight="balanced", random_state=RANDOM_SEED
         )
-        alpha_scores.append(_cv_mean(est, X_train, y_train))
+        val_s, trn_s = _cv_both(est, X_train, y_train)
+        alpha_scores.append(val_s)
+        alpha_tr_scores.append(trn_s)
 
     best_alpha_idx = int(np.argmax(alpha_scores))
     best_alpha     = float(alphas[best_alpha_idx])
@@ -85,15 +96,18 @@ def run_dt(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
 
     # ── Step 2: max_depth tuning with best alpha ──────────────────────────
     print("  Tuning max_depth ...")
-    depths       = list(range(2, 21)) + [None]
-    depth_scores = []
+    depths          = list(range(2, 21)) + [None]
+    depth_scores    = []      # validation (CV) scores — used for selection
+    depth_tr_scores = []      # training scores — for plotting only
     for d in depths:
         est = DecisionTreeClassifier(
             criterion=best_criterion,
             max_depth=d, ccp_alpha=best_alpha,
             class_weight="balanced", random_state=RANDOM_SEED,
         )
-        depth_scores.append(_cv_mean(est, X_train, y_train))
+        val_s, trn_s = _cv_both(est, X_train, y_train)
+        depth_scores.append(val_s)
+        depth_tr_scores.append(trn_s)
 
     best_d_idx  = int(np.argmax(depth_scores))
     best_depth  = depths[best_d_idx]
@@ -127,10 +141,11 @@ def run_dt(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
 
     # ── Figure 1: Complexity – ccp_alpha ─────────────────────────────────
     fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(alphas, alpha_scores, "o-", color="#4C72B0", ms=4)
+    ax.plot(alphas, alpha_tr_scores, "s--", color="#55A868", ms=4, label="Train")
+    ax.plot(alphas, alpha_scores,    "o-",  color="#4C72B0", ms=4, label="Validation (CV)")
     ax.axvline(best_alpha, color="red", ls="--", lw=1.2, label=f"opt α={best_alpha:.5f}")
     ax.set_xlabel("ccp_alpha")
-    ax.set_ylabel("CV Macro F1")
+    ax.set_ylabel("Macro F1")
     ax.set_title(f"DT — ccp_alpha Complexity Curve [{tag}]")
     ax.legend()
     ax.grid(alpha=0.3)
@@ -139,13 +154,14 @@ def run_dt(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
     # ── Figure 2: Complexity – max_depth ─────────────────────────────────
     depth_labels = [str(d) if d is not None else "None" for d in depths]
     fig, ax = plt.subplots(figsize=(7, 4))
-    ax.plot(range(len(depths)), depth_scores, "s-", color="#DD8452", ms=5)
+    ax.plot(range(len(depths)), depth_tr_scores, "s--", color="#55A868", ms=5, label="Train")
+    ax.plot(range(len(depths)), depth_scores,    "s-",  color="#DD8452", ms=5, label="Validation (CV)")
     ax.axvline(best_d_idx, color="red", ls="--", lw=1.2,
                label=f"opt depth={best_depth}")
     ax.set_xticks(range(len(depths)))
     ax.set_xticklabels(depth_labels, fontsize=7)
     ax.set_xlabel("max_depth")
-    ax.set_ylabel("CV Macro F1")
+    ax.set_ylabel("Macro F1")
     ax.set_title(f"DT — max_depth Complexity Curve [{tag}]")
     ax.legend()
     ax.grid(alpha=0.3)
