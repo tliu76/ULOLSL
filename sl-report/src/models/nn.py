@@ -38,12 +38,13 @@ DEPTH_WIDTH_ARCHS = [(200,), (100, 50), (64, 64, 32)]
 DEPTH_WIDTH_LABELS = ["1L-200", "2L-100×50", "3L-64×64×32"]
 
 # PyTorch fixed params
-PT_HIDDEN   = 100
-PT_LR       = 0.01
-PT_WD       = 1e-4
-PT_BATCH    = 64
-PT_EPOCHS   = 200
-PT_PATIENCE = 20
+PT_HIDDEN      = 100
+PT_LR          = 0.01
+PT_WD          = 1e-4
+PT_BATCH       = 64
+PT_EPOCHS      = 200
+PT_PATIENCE    = 20
+ACT_EPOCHS     = 150   # max epochs for the activation function study (extra credit)
 
 
 def _cv_mean(est, X, y) -> float:
@@ -475,7 +476,7 @@ def run_nn_pytorch(X_train, y_train, X_test, y_test, tag: str = "covertype") -> 
     fig, ax = plt.subplots(figsize=(9, 5))
     for act_name, act_cls in activations.items():
         m  = MLP(n_feats, PT_HIDDEN, n_cls, act_cls=act_cls)
-        m, h, ep = train_model(m, loader_tr, loader_val, PT_EPOCHS, PT_LR, PT_WD, PT_PATIENCE)
+        m, h, ep = train_model(m, loader_tr, loader_val, ACT_EPOCHS, PT_LR, PT_WD, PT_PATIENCE)
         preds = predict_all(m, X_test)
         test_f1 = f1_score(y_test, preds, average="macro", zero_division=0)
         act_results[act_name] = {"test_macro_f1": round(test_f1, 4), "stop_epoch": ep}

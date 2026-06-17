@@ -6,7 +6,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.svm import SVC, LinearSVC
-from sklearn.model_selection import StratifiedKFold, cross_val_score, cross_validate
+from sklearn.model_selection import StratifiedKFold, cross_validate
 from sklearn.preprocessing import StandardScaler
 
 import sys, os
@@ -14,18 +14,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils import (
     RANDOM_SEED, N_CV, SCORING,
     ensure_dirs, save_fig, save_json, eval_metrics,
-    compute_learning_curve, plot_learning_curve,
+    compute_learning_curve,
     plot_confusion_matrix, plot_per_class_bar,
     print_per_class_metrics, print_section,
 )
 
 C_GRID_COARSE  = [0.001, 0.01, 0.1, 1, 10, 100]
 GAMMA_GRID     = [0.0001, 0.001, 0.01, 0.1, 1.0]
-
-
-def _cv_mean(est, X, y) -> float:
-    cv = StratifiedKFold(n_splits=N_CV, shuffle=True, random_state=RANDOM_SEED)
-    return cross_val_score(est, X, y, cv=cv, scoring=SCORING, n_jobs=-1).mean()
 
 
 def _cv_both(est, X, y):
@@ -187,6 +182,9 @@ def run_svm(X_train, y_train, X_test, y_test, tag: str = "covertype") -> dict:
                           f"svm_{tag}_cm_rbf.png")
 
     # ── Per-class F1 bars ─────────────────────────────────────────────────
+    plot_per_class_bar(y_test, y_pred_lin,
+                       f"SVM Linear — Per-Class F1 [{tag}]",
+                       f"svm_{tag}_linear_per_class_f1.png")
     plot_per_class_bar(y_test, y_pred_rbf,
                        f"SVM RBF — Per-Class F1 [{tag}]",
                        f"svm_{tag}_rbf_per_class_f1.png")
