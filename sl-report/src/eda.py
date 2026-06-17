@@ -162,6 +162,31 @@ def print_categorical_stats(df: pd.DataFrame) -> pd.DataFrame:
     print()
     return stats
 
+
+
+# ── Section Name ────────────────────────────────────────────────────────
+##  Color palette for consistent plotting ##
+# 1. Global plot configurations (removes repetitive font size and layout tweaks)
+plt.rcParams.update({"axes.titlesize": 11, "xtick.labelsize": 8, "ytick.labelsize": 8})
+PALETTE = [plt.cm.tab10(i / 10) for i in range(7)]
+
+def finalize_and_save(fig, filename, save, xlabel=None, ylabel=None):
+    if xlabel:
+        plt.xlabel(xlabel)
+    if ylabel:
+        plt.ylabel(ylabel)
+    plt.tight_layout()
+    save(fig, filename)
+    plt.close(fig)
+
+# 6. Plotting: Class Distribution
+
+
+# ── Section Name ────────────────────────────────────────────────────────
+# ── Section Name ────────────────────────────────────────────────────────
+# ── Section Name ────────────────────────────────────────────────────────
+
+
 # 10 ── Main EDA function for the full dataset ─────────────────────────────────────────────── 
 def eda_full(df: pd.DataFrame) -> None:
     """Full-dataset exploratory data analysis
