@@ -1,0 +1,29 @@
+{
+  "macro_f1": 0.5745,
+  "accuracy": 0.661,
+  "balanced_accuracy": 0.7468,
+  "fit_s": 60.852,
+  "predict_s": 0.011,
+  "hidden": 100,
+  "lr": 0.01,
+  "wd": 0.0001,
+  "stop_epoch": 93,
+  "activation_study": {
+    "ReLU": {
+      "test_macro_f1": 0.5733,
+      "stop_epoch": 79
+    },
+    "GELU": {
+      "test_macro_f1": 0.5574,
+      "stop_epoch": 56
+    },
+    "SiLU": {
+      "test_macro_f1": 0.5239,
+      "stop_epoch": 49
+    },
+    "Tanh": {
+      "test_macro_f1": 0.5118,
+      "stop_epoch": 36
+    }
+  }
+}

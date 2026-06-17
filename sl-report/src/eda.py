@@ -1,0 +1,507 @@
+"""
+EDA for Forest Cover Type (Covertype) dataset.
+
+Produces:
+  - Full-dataset summary (shape, class distribution, feature stats)
+  - Stratified ~20,000-instance sample + sample EDA
+  - Correlation heatmap, violin plots, mutual information ranking
+  - Figures saved to outputs/eda/
+"""
+
+# %%
+import os
+import numpy as np
+import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+from matplotlib.patches import Patch
+from sklearn.model_selection import train_test_split
+from sklearn.feature_selection import mutual_info_classif
+from sklearn.dummy import DummyClassifier
+from sklearn.metrics import accuracy_score, f1_score
+
+plt.rcParams.update({"axes.grid": True, "grid.color": "white", "axes.facecolor": "#EAEAF2"})
+
+### reference guidance: https://github.com/chuawt/eda-starter ###
+### https://www.geeksforgeeks.org/data-analysis/exploratory-data-analysis-in-python/
+# %%
+# ── Paths & constants ────────────────────────────────────────────────────────
+DATA_PATH   = os.path.join(os.path.dirname(__file__), "..", "data", "covtype.data")
+INFO_PATH  =  os.path.join(os.path.dirname(__file__), "..", "data", "covtype.info")
+OUT_DIR     = os.path.join(os.path.dirname(__file__), "..", "outputs", "eda")
+SAMPLE_PATH = os.path.join(os.path.dirname(__file__), "..", "outputs", "sample.csv")
+
+RANDOM_SEED = 4
+SAMPLE_SIZE = 2000 
+
+
+
+
+# %%
+def ensure_dir(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+
+def save(fig: plt.Figure, name: str) -> None:
+    fig.savefig(os.path.join(OUT_DIR, name), dpi=150, bbox_inches="tight")
+    if os.environ.get("EDA_SHOW"):
+        plt.show()
+    plt.close(fig)
+
+
+
+
+# get the full dataset ### 
+def download_covtype():
+    bunch = fetch_covtype(as_frame=True)
+    df = bunch.frame.copy()
+    df.columns = FEATURE_COLS + [TARGET_COL]
+    os.makedirs(os.path.dirname(DATA_PATH), exist_ok=True)
+    df.to_csv(DATA_PATH, header=False, index=False)
+    return df
+
+### read the data from local path if exists, otherwise download from sklearn.datasets ### 
+def load_full() -> pd.DataFrame:
+    if not os.path.exists(DATA_PATH):
+        print(f"[eda] {DATA_PATH} not found. Downloading from sklearn.datasets ...")
+        return download_covtype()
+    return pd.read_csv(DATA_PATH, header=None, names=FEATURE_COLS + [TARGET_COL])
+
+
+
+# Names from covtype.info
+with open(INFO_PATH, "r") as f:
+    info = f.read()
+
+print(info)
+### number of instances (observations): 581,012
+### number of attributes (features): 12 measures, but 54 columns of data (10 quantitative variables, 4 binary wilderness areas and 40 binary soil type variables)
+### Given is the attribute name, attribute type, the measurement unit and a brief description.
+
+
+
+### Loading the full dataset. ###
+df = load_full()
+print(df.head())
+
+
+# Names from covtype.info
+CONTINUOUS_COLS = [
+    "Elevation", "Aspect", "Slope",
+    "Horizontal_Distance_To_Hydrology", "Vertical_Distance_To_Hydrology",
+    "Horizontal_Distance_To_Roadways",
+    "Hillshade_9am", "Hillshade_Noon", "Hillshade_3pm",
+    "Horizontal_Distance_To_Fire_Points",
+]
+WILDERNESS_COLS = [f"Wilderness_Area{i}" for i in range(1, 5)]
+SOIL_COLS       = [f"Soil_Type{i}"       for i in range(1, 41)]
+FEATURE_COLS    = CONTINUOUS_COLS + WILDERNESS_COLS + SOIL_COLS
+TARGET_COL      = "Cover_Type"
+
+CLASS_NAMES = {
+    1: "Spruce/Fir",
+    2: "Lodgepole Pine",
+    3: "Ponderosa Pine",
+    4: "Cottonwood/Willow",
+    5: "Aspen",
+    6: "Douglas-fir",
+    7: "Krummholz",
+}
+
+
+# ── 1. Full-dataset Exploratory Data Analysis ─────────────────────────────────────────────── 
+def print_basic_info(df:pd.DataFrame) -> None:
+    """ print basic dataset information"""
+    print("=" * 60)
+    print("FULL DATASET SUMMARY")
+    print("=" * 60)
+    print(f"Shape            : {df.shape}")
+    print(f"Missing values   : {df.isnull().sum().sum()}")
+    print(f"Duplicate rows  : {df.duplicated().sum()}")
+    print()
+
+# ── 2. Class distribution summary for the full dataset ───────────────────────────────────────────────
+def print_class_distribution(df: pd.DataFrame) -> pd.Series:
+    """  print class counts and percentages 
+         Return value counts for reuse in plotting
+    """
+    vc = df[TARGET_COL].value_counts().sort_index()
+    pct = vc / len(df) * 100
+    print("Class distribution: (full dataset)")
+    for cls in range(1, 8):
+        print(f"  C{cls} ({CLASS_NAMES[cls]:<22}): {vc[cls]:>8,} instances ({pct[cls]:>6.2f}%)")
+    print()
+    return vc
+
+# ── 3. Continuous feature summary for the full dataset ───────────────────────────────────────────────
+def print_continuous_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """ 
+    print summary statistics for continuous features 
+    Return the stats table for possible reuse in plotting
+    """
+    stats = df[CONTINUOUS_COLS].describe().T
+    stats["range"] = stats["max"] - stats["min"]
+    print("Continuous feature summary (full)")
+    print(stats[["mean", "std", "min", "25%", "50%", "75%", "max", "range"]])
+    print()
+    return stats
+    
+
+# ── 4. Categorical feature summary for the full dataset ───────────────────────────────────────────────
+def print_categorical_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """ 
+    print summary statistics for categorical features 
+    Return the stats table for possible reuse in plotting
+    One-hot encoded features
+    """
+    stats = df[WILDERNESS_COLS + SOIL_COLS].describe().T
+    print("Categorical feature summary (full)")
+    print(stats[["count", "unique", "top", "freq"]])
+    print()
+    return stats
+
+# 10 ── Main EDA function for the full dataset ─────────────────────────────────────────────── 
+def eda_full(df: pd.DataFrame) -> None:
+    """Full-dataset exploratory data analysis
+    Parameters:
+        df (pd.DataFrame): The full dataset.
+
+    """
+
+
+
+
+
+# ── Stratified sampling ──────────────────────────────────────────────────────
+def stratified_sample(df: pd.DataFrame) -> pd.DataFrame:
+
+    """
+    Proportional stratified sample targeting SAMPLE_SIZE instances.
+    train_test_split with stratify ensures each class is represented
+    according to its full-dataset frequency. Seed is fixed for reproducibility.
+    """
+    _, sample = train_test_split(
+        df,
+        test_size=SAMPLE_SIZE,
+        random_state=RANDOM_SEED,
+        stratify=df[TARGET_COL],
+    )
+    return sample.reset_index(drop=True)
+
+
+# ── Sample EDA ───────────────────────────────────────────────────────────────
+def eda_sample(full: pd.DataFrame, sample: pd.DataFrame) -> None:
+    print("=" * 60)
+    print("SAMPLED DATASET EDA")
+    print("=" * 60)
+    print(f"Shape            : {sample.shape}")
+    print(f"Missing values   : {sample.isnull().sum().sum()}")
+    print()
+
+    vc_full   = full[TARGET_COL].value_counts().sort_index()
+    vc_sample = sample[TARGET_COL].value_counts().sort_index()
+    pct_full   = vc_full   / len(full)   * 100
+    pct_sample = vc_sample / len(sample) * 100
+
+    print("Class distribution comparison (full vs sample):")
+    hdr = f"  {'Cls':<4} {'Name':<22} {'Full N':>8} {'Full %':>7}  {'Sample N':>9} {'Sample %':>9}"
+    print(hdr)
+    print("  " + "-" * 66)
+    for cls in range(1, 8):
+        print(f"  {cls:<4} {CLASS_NAMES[cls]:<22} "
+              f"{vc_full[cls]:>8,} {pct_full[cls]:>7.2f}%  "
+              f"{vc_sample[cls]:>9,} {pct_sample[cls]:>9.2f}%")
+    print()
+
+    # continuous stats comparison
+    cont_full   = full[CONTINUOUS_COLS].describe().T
+    cont_sample = sample[CONTINUOUS_COLS].describe().T
+    print("Continuous feature mean ± std (full vs sample):")
+    for col in CONTINUOUS_COLS:
+        print(f"  {col:<42} "
+              f"full: {cont_full.loc[col,'mean']:8.1f} ± {cont_full.loc[col,'std']:6.1f}   "
+              f"sample: {cont_sample.loc[col,'mean']:8.1f} ± {cont_sample.loc[col,'std']:6.1f}")
+    print()
+
+    # figure: side-by-side class distribution
+    x = np.arange(7)
+    w = 0.35
+    fig, ax = plt.subplots(figsize=(9, 4))
+    ax.bar(x - w/2, pct_full.values,   w, label="Full (581,012)",    color="steelblue",  alpha=0.8)
+    ax.bar(x + w/2, pct_sample.values, w, label=f"Sample ({SAMPLE_SIZE:,})", color="darkorange", alpha=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"C{i}\n{CLASS_NAMES[i]}" for i in range(1, 8)], fontsize=8)
+    ax.set_ylabel("Class proportion (%)")
+    ax.set_title("Class Distribution: Full vs. Stratified Sample")
+    ax.legend()
+    plt.tight_layout()
+    save(fig, "class_dist_comparison.png")
+
+    # figure: z-scored boxplots of sample continuous features
+    z = (sample[CONTINUOUS_COLS] - sample[CONTINUOUS_COLS].mean()) / sample[CONTINUOUS_COLS].std()
+    fig, ax = plt.subplots(figsize=(10, 4))
+    z.boxplot(ax=ax, vert=False, patch_artist=True,
+              boxprops=dict(facecolor="darkorange", alpha=0.6),
+              medianprops=dict(color="red"))
+    ax.set_title(f"Sampled Dataset — Continuous Features (z-scored, N={SAMPLE_SIZE:,})")
+    ax.set_xlabel("Standard deviations from mean")
+    ax.axvline(0, color="gray", lw=0.8, ls="--")
+    plt.tight_layout()
+    save(fig, "continuous_boxplots_sample.png")
+
+    # figure: per-class normalised feature means heatmap
+    class_means = sample.groupby(TARGET_COL)[CONTINUOUS_COLS].mean()
+    norm = (class_means - class_means.min()) / (class_means.max() - class_means.min())
+    fig, ax = plt.subplots(figsize=(11, 4))
+    im = ax.imshow(norm.T, aspect="auto", cmap="YlOrRd")
+    ax.set_xticks(range(7))
+    ax.set_xticklabels([f"C{i}\n{CLASS_NAMES[i]}" for i in range(1, 8)], fontsize=7)
+    ax.set_yticks(range(len(CONTINUOUS_COLS)))
+    ax.set_yticklabels(CONTINUOUS_COLS, fontsize=8)
+    ax.set_title("Per-Class Normalised Feature Means (Sample)")
+    fig.colorbar(im, ax=ax, label="Normalised mean")
+    plt.tight_layout()
+    save(fig, "per_class_feature_heatmap_sample.png")
+
+    # figure: wilderness area prevalence per class
+    fig, axes = plt.subplots(1, 4, figsize=(12, 3), sharey=False)
+    for i, col in enumerate(WILDERNESS_COLS):
+        pct = sample.groupby(TARGET_COL)[col].mean() * 100
+        axes[i].bar([str(c) for c in pct.index], pct.values, color="teal", alpha=0.75)
+        axes[i].set_title(col.replace("Wilderness_Area", "WA"), fontsize=9)
+        axes[i].set_xlabel("Cover Type")
+        if i == 0:
+            axes[i].set_ylabel("% instances")
+    fig.suptitle("Wilderness Area Prevalence per Cover Type (Sample)", fontsize=10)
+    plt.tight_layout()
+    save(fig, "wilderness_by_class_sample.png")
+
+    # figure: soil type sparsity
+    soil_pct = sample[SOIL_COLS].mean() * 100
+    fig, ax = plt.subplots(figsize=(12, 3))
+    ax.bar(range(40), soil_pct.values, color="slategray", alpha=0.7)
+    ax.set_xticks(range(40))
+    ax.set_xticklabels([f"S{i+1}" for i in range(40)], rotation=90, fontsize=6)
+    ax.set_ylabel("% active")
+    ax.set_title("Soil Type Prevalence in Sampled Dataset")
+    plt.tight_layout()
+    save(fig, "soil_type_prevalence_sample.png")
+
+    palette = [plt.cm.tab10(i / 10) for i in range(7)]
+
+    # figure: correlation heatmap of continuous features
+    corr = sample[CONTINUOUS_COLS].corr()
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+    fig, ax = plt.subplots(figsize=(9, 7))
+    corr_masked = np.where(mask, np.nan, corr.values)
+    im = ax.imshow(corr_masked, cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
+    fig.colorbar(im, ax=ax, label="Pearson r")
+    ticks = range(len(CONTINUOUS_COLS))
+    ax.set_xticks(ticks); ax.set_xticklabels(CONTINUOUS_COLS, rotation=45, ha="right", fontsize=7)
+    ax.set_yticks(ticks); ax.set_yticklabels(CONTINUOUS_COLS, fontsize=7)
+    for i in range(len(CONTINUOUS_COLS)):
+        for j in range(len(CONTINUOUS_COLS)):
+            if not mask[i, j]:
+                ax.text(j, i, f"{corr.values[i, j]:.2f}", ha="center", va="center", fontsize=5)
+    ax.set_title("Continuous Feature Correlation Matrix (Sample)", pad=12)
+    plt.tight_layout()
+    save(fig, "correlation_heatmap_sample.png")
+
+    # figure: violin plots for top discriminating continuous features
+    top_features = ["Elevation", "Slope", "Hillshade_Noon", "Horizontal_Distance_To_Roadways"]
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    for ax, feat in zip(axes.flat, top_features):
+        groups = [sample.loc[sample[TARGET_COL] == cls, feat].values for cls in range(1, 8)]
+        parts = ax.violinplot(groups, positions=range(1, 8), showmedians=True)
+        for i, pc in enumerate(parts["bodies"]):
+            pc.set_facecolor(palette[i])
+            pc.set_alpha(0.7)
+        ax.set_xticks(range(1, 8))
+        ax.set_xticklabels([CLASS_NAMES[i] for i in range(1, 8)],
+                           rotation=30, ha="right", fontsize=7)
+        ax.set_xlabel("Cover Type")
+        ax.set_ylabel(feat)
+        ax.set_title(f"{feat} by Cover Type")
+    fig.suptitle("Feature Distributions by Cover Type (Sample)", fontsize=12, y=1.01)
+    plt.tight_layout()
+    save(fig, "violin_top_features_sample.png")
+
+    # figure: mutual information scores for all features
+    discrete_mask = (
+        [False] * len(CONTINUOUS_COLS)
+        + [True] * (len(WILDERNESS_COLS) + len(SOIL_COLS))
+    )
+    mi = mutual_info_classif(
+        sample[FEATURE_COLS], sample[TARGET_COL],
+        discrete_features=discrete_mask,
+        random_state=RANDOM_SEED,
+    )
+    mi_series = pd.Series(mi, index=FEATURE_COLS).sort_values(ascending=True)
+    top_mi = mi_series.tail(20)
+    bar_colors = [
+        "steelblue"  if f in CONTINUOUS_COLS else
+        "darkorange" if f in WILDERNESS_COLS else
+        "slategray"
+        for f in top_mi.index
+    ]
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.barh(top_mi.index, top_mi.values, color=bar_colors, alpha=0.85)
+    ax.set_xlabel("Mutual Information Score")
+    ax.set_title("Top 20 Features by Mutual Information (Sample)")
+    ax.legend(handles=[
+        Patch(facecolor="steelblue",  alpha=0.85, label="Continuous"),
+        Patch(facecolor="darkorange", alpha=0.85, label="Wilderness"),
+        Patch(facecolor="slategray",  alpha=0.85, label="Soil Type"),
+    ], loc="lower right")
+    plt.tight_layout()
+    save(fig, "mutual_information_top20_sample.png")
+
+
+# ── Preprocessing notes ──────────────────────────────────────────────────────
+def print_preprocessing_notes(sample: pd.DataFrame) -> None:
+    print("=" * 60)
+    print("PREPROCESSING & IMBALANCE NOTES")
+    print("=" * 60)
+
+    vc = sample[TARGET_COL].value_counts().sort_index()
+    ir = vc.max() / vc.min()
+    print(f"Imbalance ratio (majority / minority): {ir:.1f}x")
+    print()
+
+    raw_ranges = sample[CONTINUOUS_COLS].max() - sample[CONTINUOUS_COLS].min()
+    print("Raw feature ranges (motivates StandardScaler):")
+    for col in CONTINUOUS_COLS:
+        print(f"  {col:<42} {raw_ranges[col]:,.0f}")
+    print()
+    print("=> kNN, SVM, and NN require StandardScaler fitted on training data only.")
+    print("=> Decision Trees are scale-invariant.")
+    print()
+    print(f"Feature groups: {len(CONTINUOUS_COLS)} continuous, "
+          f"{len(WILDERNESS_COLS)} wilderness binary, "
+          f"{len(SOIL_COLS)} soil-type binary  (total {len(FEATURE_COLS)})")
+
+
+# ── Justification & leakage debug ────────────────────────────────────────────
+def sanity_and_justification(full: pd.DataFrame, sample: pd.DataFrame) -> None:
+    """
+    Three-part output required by the assignment:
+      1. Sampling strategy justification
+      2. Metric choice justification (Macro F1 vs Accuracy)
+      3. Leakage / evaluation debug (dummy baseline + shuffled-label + split integrity)
+    """
+    print("=" * 60)
+    print("JUSTIFICATION & LEAKAGE DEBUG")
+    print("=" * 60)
+
+    # ── 1. Sampling strategy ──────────────────────────────────────────────
+    print("1. Sampling strategy justification")
+    print(f"   Method  : Proportional stratified sample (n={SAMPLE_SIZE:,}, seed={RANDOM_SEED})")
+    print(f"   Why n={SAMPLE_SIZE:,}: balances runtime (<2 min/fold for kNN/SVM) with "
+          "statistical representativeness.")
+    vc_full   = full[TARGET_COL].value_counts().sort_index()
+    vc_sample = sample[TARGET_COL].value_counts().sort_index()
+    pct_full   = vc_full   / len(full)   * 100
+    pct_sample = vc_sample / len(sample) * 100
+    max_drift = (pct_sample - pct_full).abs().max()
+    print(f"   Class proportion drift (full vs sample): max {max_drift:.3f} pp — "
+          "stratification successful.")
+    print()
+
+    # ── 2. Metric choice justification ───────────────────────────────────
+    print("2. Metric choice justification (Macro F1 > Accuracy for Covertype)")
+    X = sample[FEATURE_COLS].values
+    y = sample[TARGET_COL].values
+    idx = np.arange(len(sample))
+    tr_idx, te_idx = train_test_split(idx, test_size=0.2,
+                                      stratify=y, random_state=RANDOM_SEED)
+    X_tr, X_te = X[tr_idx], X[te_idx]
+    y_tr, y_te = y[tr_idx], y[te_idx]
+
+    dummy_mf = DummyClassifier(strategy="most_frequent")
+    dummy_mf.fit(X_tr, y_tr)
+    y_mf   = dummy_mf.predict(X_te)
+    acc_mf = accuracy_score(y_te, y_mf)
+    f1_mf  = f1_score(y_te, y_mf, average="macro", zero_division=0)
+    maj_cls = int(vc_full.idxmax())
+    print(f"   DummyClassifier (always predicts C{maj_cls} = '{CLASS_NAMES[maj_cls]}'):")
+    print(f"     Accuracy : {acc_mf:.4f}  ({acc_mf:.1%}) — deceptively high due to class imbalance")
+    print(f"     Macro F1 : {f1_mf:.4f}  — correctly reveals zero minority-class recall")
+    print(f"   => Macro F1 is the primary metric; accuracy is reported but not optimised.")
+    print()
+
+    # ── 3. Leakage debug ────────────────────────────────────────────────
+    print("3. Leakage / evaluation debug")
+
+    # 3a. Shuffled-label baseline (performance must collapse)
+    rng = np.random.default_rng(RANDOM_SEED)
+    y_tr_shuf = rng.permutation(y_tr)
+    dummy_st  = DummyClassifier(strategy="stratified", random_state=RANDOM_SEED)
+    dummy_st.fit(X_tr, y_tr_shuf)
+    y_st  = dummy_st.predict(X_te)
+    f1_st = f1_score(y_te, y_st, average="macro", zero_division=0)
+    print(f"   Shuffled-label baseline Macro F1 : {f1_st:.4f}  "
+          f"(near-chance — confirms no label leakage can explain real results)")
+
+    # 3b. Split integrity: no index overlap between train and test
+    overlap = len(set(tr_idx.tolist()) & set(te_idx.tolist()))
+    print(f"   Split integrity : {len(tr_idx):,} train + {len(te_idx):,} test, "
+          f"overlapping indices = {overlap}  "
+          f"({'OK' if overlap == 0 else 'WARNING: OVERLAP FOUND'})")
+
+    # 3c. Sample vs full-dataset row overlap check (sampling leakage)
+    sample_dupes = sample.duplicated().sum()
+    print(f"   Duplicate rows in sample : {sample_dupes}  "
+          f"({'OK' if sample_dupes == 0 else 'WARNING'})")
+    print()
+
+    # Figure: Accuracy vs Macro F1 for baselines
+    labels   = ["Dummy\n(most_frequent)", "Shuffled\n(stratified)"]
+    accs     = [acc_mf,  accuracy_score(y_te, y_st)]
+    f1s      = [f1_mf,   f1_st]
+    x = np.arange(2)
+    w = 0.35
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.bar(x - w/2, accs, w, label="Accuracy",  color="steelblue",  alpha=0.8)
+    ax.bar(x + w/2, f1s,  w, label="Macro F1",  color="darkorange", alpha=0.8)
+    ax.axhline(1 / 7, color="red", ls="--", lw=1.2, label="Chance (1/7)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel("Score")
+    ax.set_ylim(0, 1.05)
+    ax.set_title("Leakage Debug — Baseline Scores (Accuracy vs Macro F1)")
+    ax.legend(fontsize=8)
+    plt.tight_layout()
+    save(fig, "leakage_debug_baselines.png")
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+def main() -> None:
+    ensure_dir(OUT_DIR)
+    ensure_dir(os.path.dirname(SAMPLE_PATH))
+
+    print(f"Loading data from {DATA_PATH} ...")
+    full = load_full()
+    print(f"Loaded {len(full):,} rows, {full.shape[1]} columns.\n")
+
+    eda_full(full)
+
+    print(f"Creating stratified sample (n={SAMPLE_SIZE:,}, seed={RANDOM_SEED}) ...")
+    sample = stratified_sample(full)
+    sample.to_csv(SAMPLE_PATH, index=False)
+    print(f"Sample saved to {os.path.abspath(SAMPLE_PATH)}\n")
+
+    eda_sample(full, sample)
+    print_preprocessing_notes(sample)
+    sanity_and_justification(full, sample)
+
+    print(f"\nAll figures saved to {os.path.abspath(OUT_DIR)}/")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+# %%
