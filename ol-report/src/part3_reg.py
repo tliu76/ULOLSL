@@ -1,9 +1,6 @@
 """
 Part 3: Regularization study with STANDARD ADAM (best Part-2 HPs, kept fixed).
 
-Do NOT switch to AdamW or retune lr/betas here — that would confound optimizer
-effects with regularization. Only add/remove/alter regularization mechanisms.
-
 Required techniques: L2 weight decay (coupled), early stopping, dropout,
 label smoothing, and modest train-only input noise/augmentation.
 
