@@ -28,7 +28,7 @@ from .model import build_model, freeze_to_final_layers, get_flat_params, set_fla
 from .plotting import plot_best_so_far, save_json, save_table
 from .ro_algorithms import RO_ALGORITHMS
 from .seeds import set_all_seeds
-from .train import evaluate, final_test_metrics, make_criterion, train_model
+from .train import evaluate, final_test_metrics, make_criterion_for, train_model
 
 
 def _make_val_objective(model, params, val_loader, criterion):
@@ -44,16 +44,17 @@ def run_part1(seeds=None, algorithms=("rhc", "sa", "ga"),
               budget: int = C.RO_FUNC_EVAL_BUDGET) -> pd.DataFrame:
     seeds = seeds or C.SEEDS
     split = get_split()
-    criterion = make_criterion()
+    criterion = make_criterion_for(split)
     rows, all_histories = [], {}
 
     for seed in seeds:
         set_all_seeds(seed)
         train_loader, val_loader, test_loader = make_loaders(split, seed=seed)
 
-        # 1) trained backbone (baseline weights) — retrain or load a checkpoint.
+        # 1) trained backbone == the SL SGD-only baseline (same optimizer/LR), so
+        #    RO fine-tunes the final layer of the exact OL reference network.
         model = build_model(dropout_p=0.0)
-        opt = torch.optim.SGD([p for p in model.parameters()], lr=1e-2, momentum=0.9)
+        opt = torch.optim.SGD([p for p in model.parameters()], lr=C.BASELINE_LR, momentum=0.0)
         train_model(model, train_loader, val_loader, opt, criterion, seed=seed)
 
         # 2) freeze to final layers under the parameter cap

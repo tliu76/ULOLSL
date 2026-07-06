@@ -18,7 +18,7 @@ OL_DIR     = os.path.dirname(SRC_DIR)
 REPO_ROOT  = os.path.dirname(OL_DIR)
 
 # Reuse the EXACT Covertype data from the SL Report (SL continuity requirement).
-SL_DATA_DIR = os.path.join(REPO_ROOT, "sl-report", "Data")
+SL_DATA_DIR = os.path.join(REPO_ROOT, "sl-report", "data")
 DATA_PATH   = os.path.join(SL_DATA_DIR, "covtype.data")
 INFO_PATH   = os.path.join(SL_DATA_DIR, "covtype.info")
 
@@ -37,8 +37,10 @@ for _d in (OUT_DIR, FIG_DIR, RESULT_DIR, LOG_DIR):
 
 # ── Reproducibility ───────────────────────────────────────────────────────────
 # >= 3 seeds required for all main claims (assignment § "Do I need multiple seeds").
-SEEDS       = [0, 1, 2]
-SAMPLE_SEED = 4          # MUST match the seed used to build the SL sample.
+# Sizes may be shrunk via env vars for a fast smoke test (see OL_* below); the
+# defaults are the values used for the reported runs.
+SEEDS       = [int(s) for s in os.environ.get("OL_SEEDS", "0,1,2").split(",")]
+SAMPLE_SEED = 42         # matches the seed used to build the SL sample.csv.
 SPLIT_SEED  = 42         # train/val/test split seed (fixed across all parts).
 
 # ── Dataset / sample / split ──────────────────────────────────────────────────
@@ -67,23 +69,30 @@ CLASS_NAMES = {
     3: "Cottonwood/Willow", 4: "Aspen", 5: "Douglas-fir", 6: "Krummholz",
 }
 
-# ── PyTorch backbone (MUST match your finalized SL architecture) ──────────────
-# TODO(SL): replace HIDDEN_SIZES / activation with the network you finalized in
-# the SL Report. This is the single source of truth for the OL backbone; do not
-# change it between parts unless a part explicitly permits (only Part 3 alters
+# ── PyTorch backbone (matches the finalized SL architecture) ──────────────────
+# Finalized SL PyTorch MLP: one hidden layer of 150 ReLU units (54 -> 150 -> 7),
+# class-weighted cross-entropy. This is the single source of truth for the OL
+# backbone; the topology stays fixed across all parts (only Part 3 alters
 # regularization such as dropout).
-HIDDEN_SIZES = [256, 128]        # placeholder — set to your SL MLP.
+HIDDEN_SIZES = [150]             # SL finalized PyTorch MLP (single hidden layer).
 DROPOUT_P    = 0.0               # base backbone has NO dropout (Part 3 varies it).
+CLASS_WEIGHTED = True            # SL used balanced class-weighted CrossEntropyLoss.
 
 # ── Shared training budget (kept fixed for fair comparison) ───────────────────
+# Baseline / Part-2 / Part-3 use a FIXED epoch budget (no early stopping outside
+# the Part-3 early-stopping condition) so all optimizers get identical compute.
 BATCH_SIZE  = 128
-EPOCHS      = 60                 # gradient-based budget; RO uses function-eval budget.
-DEVICE      = "cpu"             # set "cuda"/"mps" if available; report hardware.
+EPOCHS      = int(os.environ.get("OL_EPOCHS", "100"))   # gradient-based budget.
+BASELINE_LR = 0.1                # SL PyTorch SGD-only learning rate.
+DEVICE      = "cpu"              # set "cuda"/"mps" if available; report hardware.
 
 # ── Part 1: Randomized Optimization on final layers ───────────────────────────
-RO_TRAINABLE_LAYERS = 2          # final 1..3 layers unfrozen for RO.
+# The SL backbone has two Linear layers (54->150, 150->7). We freeze the learned
+# representation (first layer) and run RO over ONLY the final classifier layer,
+# i.e. 150*7 + 7 = 1,057 trainable parameters -- well under the 50k cap.
+RO_TRAINABLE_LAYERS = 1          # final classifier layer unfrozen for RO.
 RO_PARAM_CAP        = 50_000     # hard cap on trainable RO parameters.
-RO_FUNC_EVAL_BUDGET = 3_000      # one validation-loss objective call == 1 func eval.
+RO_FUNC_EVAL_BUDGET = int(os.environ.get("OL_RO_BUDGET", "3000"))  # 1 objective call == 1 func eval.
 RO_VAL_SUBSET       = None       # None => full val set; else fixed subset size (disclose).
 
 # ── Part 2: Adam-family ablations ─────────────────────────────────────────────
@@ -94,9 +103,11 @@ LR_GRID_ADAM = [3e-4, 1e-3, 3e-3]
 ALPHA_GRID = [3e-4, 1e-3, 3e-3]
 BETA1_GRID = [0.0, 0.9, 0.99]
 BETA2_GRID = [0.99, 0.999, 0.9999]
-# ell: fixed validation-loss threshold for speed-to-target. Chosen from pilot
-# runs on train/val ONLY (never test). Set after a pilot; keep constant.
-ELL_VAL_LOSS = None              # TODO: set from pilot (e.g. 0.65).
+# ell: fixed validation-loss threshold for speed-to-target. Chosen from the
+# baseline pilot on train/val ONLY (never test): the SGD-only baseline settles at
+# validation loss ~0.69, so 0.70 is a modest improvement target that at least one
+# optimizer reaches, exposing how quickly each optimizer gets there. Kept constant.
+ELL_VAL_LOSS = 0.70
 
 # ── Part 3: Regularization study (standard Adam, best Part-2 HPs, fixed) ──────
 WEIGHT_DECAY_GRID   = [1e-5, 1e-4, 1e-3]

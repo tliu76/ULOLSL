@@ -66,6 +66,22 @@ def make_criterion(label_smoothing: float = 0.0, weight: torch.Tensor | None = N
     return nn.CrossEntropyLoss(label_smoothing=label_smoothing, weight=weight)
 
 
+def make_criterion_for(split, label_smoothing: float = 0.0):
+    """Build the OL loss for a given split.
+
+    The SL PyTorch backbone used *balanced class-weighted* cross-entropy; we reuse
+    that here (config.CLASS_WEIGHTED) so the OL baseline reproduces the SL network
+    and minority-class behaviour stays comparable. Weights are inverse-frequency on
+    the TRAIN split only (deterministic), so val/test cross-entropy is weighted the
+    same way across every part -- a fixed, held-constant property of the backbone.
+    """
+    weight = None
+    if C.CLASS_WEIGHTED:
+        from .data import class_weights
+        weight = class_weights(split.y_train).to(C.DEVICE)
+    return make_criterion(label_smoothing=label_smoothing, weight=weight)
+
+
 def train_model(
     model: nn.Module,
     train_loader,

@@ -30,7 +30,7 @@ from .metrics import compute_metrics
 from .model import build_model
 from .plotting import plot_heatmap, plot_trajectories, save_json, save_table
 from .seeds import set_all_seeds
-from .train import final_test_metrics, make_criterion, train_model
+from .train import final_test_metrics, make_criterion_for, train_model
 
 
 # ── Optimizer factory (one place, so protocols stay comparable) ───────────────
@@ -60,12 +60,15 @@ OPTIMIZERS = ["sgd", "sgd_momentum", "nesterov", "adam",
 def run_ablations(seeds=None, lr_by_opt: dict | None = None) -> pd.DataFrame:
     """Train each required optimizer variant across seeds; log trajectories + metrics."""
     seeds = seeds or C.SEEDS
-    lr_by_opt = lr_by_opt or {  # TODO: set from coarse per-family LR search.
-        "sgd": 3e-2, "sgd_momentum": 1e-2, "nesterov": 1e-2, "adam": 1e-3,
+    # Per-family learning rates from the coarse pilot LR search (LR_GRID_SGD /
+    # LR_GRID_ADAM, 1 seed, reported in REPRO). SGD-family best at 0.1 (matches
+    # the SL baseline); Adam-family best at 1e-3. AdamW uses the same LR as Adam.
+    lr_by_opt = lr_by_opt or {
+        "sgd": 1e-1, "sgd_momentum": 1e-1, "nesterov": 1e-1, "adam": 1e-3,
         "adam_no_bias": 1e-3, "adam_beta1_0": 1e-3, "adamw": 1e-3,
     }
     split = get_split()
-    criterion = make_criterion()
+    criterion = make_criterion_for(split)
     rows, traj_for_plot = [], {}
 
     for name in OPTIMIZERS:
@@ -106,7 +109,7 @@ def run_sensitivity(seed: int = 0, beta_axis: str = "beta1") -> np.ndarray:
     feasible. Returns the value matrix and saves the heatmap.
     """
     split = get_split()
-    criterion = make_criterion()
+    criterion = make_criterion_for(split)
     betas = C.BETA1_GRID if beta_axis == "beta1" else C.BETA2_GRID
     grid = np.full((len(betas), len(C.ALPHA_GRID)), np.nan)
 

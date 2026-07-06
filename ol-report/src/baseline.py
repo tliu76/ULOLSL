@@ -17,14 +17,19 @@ from .metrics import compute_metrics
 from .model import build_model
 from .plotting import save_json, save_table
 from .seeds import set_all_seeds
-from .train import evaluate, final_test_metrics, make_criterion, train_model
+from .train import evaluate, final_test_metrics, make_criterion_for, train_model
 
 
-def run_baseline(seeds=None, lr: float = 1e-2) -> list[dict]:
-    """SGD-only baseline over seeds. Returns list of per-seed result rows."""
+def run_baseline(seeds=None, lr: float = C.BASELINE_LR) -> list[dict]:
+    """SL PyTorch SGD-only baseline over seeds. Returns per-seed result rows.
+
+    Reproduces the SL PyTorch reference: single 150-unit ReLU MLP, plain SGD
+    (momentum 0, no weight decay), class-weighted cross-entropy, fixed epoch
+    budget. This is the OL reference point that every intervention compares to.
+    """
     seeds = seeds or C.SEEDS
     split = get_split()
-    criterion = make_criterion()
+    criterion = make_criterion_for(split)
     rows = []
 
     for seed in seeds:
