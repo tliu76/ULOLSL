@@ -34,30 +34,90 @@ from . import config as C
 
 # ── Load / sample ─────────────────────────────────────────────────────────────
 def load_full() -> pd.DataFrame:
-    if not os.path.exists(C.DATA_PATH):
-        raise FileNotFoundError(
-            f"Covertype data not found at {C.DATA_PATH}. Copy the SL Report data here."
-        )
-    return pd.read_csv(C.DATA_PATH, header=None, names=C.FEATURE_COLS + [C.TARGET_COL])
+    """Full Covertype: read SL's covtype.data if present, else fetch via sklearn.
 
-
-def load_sample() -> pd.DataFrame:
-    """Load the SL stratified sample if present, else rebuild it (and warn)."""
-    if os.path.exists(C.SL_SAMPLE_PATH):
-        return pd.read_csv(C.SL_SAMPLE_PATH)
+    Mirrors the SL Report's loader (sl-report/src/sampling.py) so regenerating the
+    stratified sample reproduces the exact SL rows. fetch_covtype downloads the
+    UCI Covertype set (~11 MB) to sklearn's data home on first use; CARC compute
+    nodes have outbound internet.
+    """
+    if os.path.exists(C.DATA_PATH):
+        return pd.read_csv(C.DATA_PATH, header=None,
+                           names=C.FEATURE_COLS + [C.TARGET_COL])
 
     warnings.warn(
-        f"SL sample not found at {C.SL_SAMPLE_PATH}. Rebuilding a stratified "
-        f"n={C.SAMPLE_SIZE} sample with seed={C.SAMPLE_SEED}. CONFIRM this matches "
-        "the SL Report sample or mark the SL/OL comparison as approximate.",
+        f"Covertype raw data not found at {C.DATA_PATH}; downloading via "
+        "sklearn.datasets.fetch_covtype (same source as the SL loader).",
         stacklevel=2,
     )
+    from sklearn.datasets import fetch_covtype
+
+    bunch = fetch_covtype(as_frame=True)
+    df = bunch.frame.copy()
+    df.columns = C.FEATURE_COLS + [C.TARGET_COL]
+    # Cache to the UL outputs dir so subsequent runs skip the download. We do not
+    # write into sl-report/ (out of scope; leave the SL checkout untouched).
+    raw_cache = os.path.join(C.OUT_DIR, "covtype.data")
+    try:
+        df.to_csv(raw_cache, header=False, index=False)
+        print(f"[data] Cached full Covertype -> {raw_cache}  ({len(df):,} rows)")
+    except OSError:
+        pass
+    return df
+
+
+def _regenerate_sample() -> pd.DataFrame:
+    """Rebuild the SL sample from full Covertype using the SAME procedure/seed.
+
+    The SL Report drew a proportional stratified n=SAMPLE_SIZE sample with
+    seed=SAMPLE_SEED (confirmed in the SL run log). Reproducing the identical
+    ``train_test_split(full, test_size=SAMPLE_SIZE, stratify=Cover_Type,
+    random_state=SAMPLE_SEED)`` call yields the exact same rows SL/OL used, so
+    continuity holds. Cached to UL_SAMPLE_PATH so it is regenerated only once.
+    """
+    if os.path.exists(C.UL_SAMPLE_PATH):
+        cached = pd.read_csv(C.UL_SAMPLE_PATH)
+        if len(cached) >= 0.8 * C.SAMPLE_SIZE:
+            return cached
     full = load_full()
     _, sample = train_test_split(
         full, test_size=C.SAMPLE_SIZE, random_state=C.SAMPLE_SEED,
         stratify=full[C.TARGET_COL],
     )
-    return sample.reset_index(drop=True)
+    sample = sample.reset_index(drop=True)
+    sample.to_csv(C.UL_SAMPLE_PATH, index=False)
+    print(f"[data] Regenerated SL-faithful sample (n={len(sample):,}, "
+          f"seed={C.SAMPLE_SEED}) -> {C.UL_SAMPLE_PATH}")
+    return sample
+
+
+def load_sample() -> pd.DataFrame:
+    """Reuse the SL stratified sample; enforce the ~20k assignment requirement.
+
+    Preference order:
+      1. The SL committed sample.csv, IF it holds ~SAMPLE_SIZE rows (true reuse).
+      2. A UL-cached / freshly regenerated 20k sample built with the SAME
+         seed=42 stratified procedure SL used (the committed copy on this
+         checkout is a 2k smoke truncation, so we rebuild the full sample).
+    """
+    if os.path.exists(C.SL_SAMPLE_PATH):
+        df = pd.read_csv(C.SL_SAMPLE_PATH)
+        if len(df) >= 0.8 * C.SAMPLE_SIZE:
+            return df
+        warnings.warn(
+            f"SL sample at {C.SL_SAMPLE_PATH} has only {len(df)} rows "
+            f"(< 0.8*{C.SAMPLE_SIZE}); it is a truncated smoke copy. Regenerating "
+            f"the identical stratified n={C.SAMPLE_SIZE}, seed={C.SAMPLE_SEED} "
+            "sample from full Covertype to match the SL Report's real sample.",
+            stacklevel=2,
+        )
+    else:
+        warnings.warn(
+            f"SL sample not found at {C.SL_SAMPLE_PATH}. Rebuilding the stratified "
+            f"n={C.SAMPLE_SIZE}, seed={C.SAMPLE_SEED} sample used by SL/OL.",
+            stacklevel=2,
+        )
+    return _regenerate_sample()
 
 
 def _cont_idx() -> np.ndarray:

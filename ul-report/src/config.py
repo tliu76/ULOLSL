@@ -44,8 +44,11 @@ INFO_PATH = _first_existing(
 )
 
 # If the SL EDA already wrote a stratified sample, point here to reuse it
-# verbatim. If missing, data.py rebuilds it from SAMPLE_SIZE + SAMPLE_SEED and
-# warns that you must confirm it matches the SL Report sample.
+# verbatim. The SL Report built this file with n=20,000, seed=42, proportional
+# stratified sampling (confirmed in the SL run log). If the file on disk is a
+# truncated smoke-test copy (< ~0.8*SAMPLE_SIZE rows), data.py regenerates the
+# identical 20k sample from the full Covertype data using the SAME procedure and
+# seed, so SL continuity is preserved without editing the SL committed file.
 SL_SAMPLE_PATH = _first_existing(
     os.path.join(REPO_ROOT, "sl-report", "outputs", "sample.csv"),
     os.path.join(REPO_ROOT, "ol-report", "outputs", "sample.csv"),
@@ -57,6 +60,10 @@ RESULT_DIR = os.path.join(OUT_DIR, "results")
 LOG_DIR    = os.path.join(OUT_DIR, "logs")
 for _d in (OUT_DIR, FIG_DIR, RESULT_DIR, LOG_DIR):
     os.makedirs(_d, exist_ok=True)
+
+# UL-owned cache for a regenerated sample (used only if the SL sample on disk is
+# a truncated smoke copy). Writing here never touches the SL Report's file.
+UL_SAMPLE_PATH = os.path.join(OUT_DIR, "sample.csv")
 
 # ── Reproducibility ───────────────────────────────────────────────────────────
 FAST = os.environ.get("UL_FAST", "0") == "1"
@@ -108,7 +115,9 @@ KMEANS_KS      = [2, 3, 5] if FAST else [2, 3, 4, 5, 6, 7, 8, 10, 12]
 KMEANS_N_INIT  = 10
 KMEANS_MAX_ITER = 300
 
-GMM_COMPONENTS = [2, 3, 5] if FAST else [2, 3, 4, 5, 6, 7, 8, 10, 12]
+# Upper end extended past k=7 so BIC/AIC can plateau or turn instead of pinning
+# at the grid ceiling (a min-BIC that always lands on the largest n is a red flag).
+GMM_COMPONENTS = [2, 3, 5] if FAST else [2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20]
 GMM_COV_TYPES  = ["full", "diag"] if FAST else ["full", "tied", "diag", "spherical"]
 GMM_N_INIT     = 3
 GMM_MAX_ITER   = 200
@@ -118,14 +127,22 @@ GMM_REG_COVAR  = 1e-6
 SILHOUETTE_SAMPLE = 2_000 if FAST else 5_000
 
 # ── Part 2: Dimensionality reduction ──────────────────────────────────────────
-# PCA component count is JUSTIFIED by cumulative explained variance; we report
-# the full curve and pick the smallest k reaching PCA_VAR_TARGET.
+# Each method's component count is chosen by METHOD-APPROPRIATE evidence, not a
+# single shared number (FAQ §8): PCA by cumulative explained variance, ICA by the
+# retained non-Gaussian rank, RP by the distance-distortion / JL reference. The
+# per-method justified dims are computed at runtime in dr.justified_components().
 PCA_VAR_TARGET = 0.90
-# Candidate component counts for the DR sweep / comparability across methods.
+# Candidate component counts for the DR sweeps (scree/reconstruction/distortion
+# curves + the NN performance-vs-dim curve). Wide enough to show "how low can we
+# go" and to let RP at high dim approach PCA at low dim.
 DR_COMPONENTS  = [2, 5, 10, 15, 20, 30] if not FAST else [2, 5, 10]
-# Component count reused for ICA and RP so the cross-method comparison is fair
-# (FAQ §8 "You do not need to use the same number of components ... explain why").
-# Resolved at runtime from PCA if left None.
+# NN-after-DR performance-vs-n_components sweep (Part 4). One curve answers
+# "how many components are enough" far better than a single-dim bar chart.
+NN_DR_SWEEP_DIMS = [5, 10, 20, 30] if not FAST else [5, 10]
+# RP JL-distortion tolerance used to justify the RP component count (eps in the
+# Johnson-Lindenstrauss sense: target ~+/-eps multiplicative distance error).
+RP_JL_EPS = 0.30
+# Optional manual overrides (else resolved per method at runtime).
 ICA_N_COMPONENTS = None
 RP_N_COMPONENTS  = None
 ICA_MAX_ITER     = 500
@@ -133,6 +150,9 @@ ICA_TOL          = 1e-3
 ICA_FUN          = "logcosh"      # FastICA contrast function.
 RP_KIND          = "gaussian"     # "gaussian" or "sparse" Random Projection.
 DIST_PAIRS       = 5_000          # random pairs for RP distance-preservation check.
+# RP is the least stable method, so it gets the MOST seeds -- seed variability is
+# the whole point of the RP section (FAQ §8). Others stay at SEEDS.
+RP_SEEDS = [0, 1, 2] if FAST else list(range(10))
 
 # ── Part 4: Neural network after DR (leakage-safe) ────────────────────────────
 # Best justified recipe informed by SL (150-unit ReLU MLP, class-weighted CE) and
@@ -146,7 +166,12 @@ NN_LR           = 1e-3
 NN_WEIGHT_DECAY = 1e-4            # OL regularization finding (modest).
 NN_BATCH_SIZE   = 128
 NN_EPOCHS       = 20 if FAST else 100
-NN_EARLY_STOP_PATIENCE = 10       # monitor val loss; restore best weights.
+# OL Part 3 measured early stopping on VALIDATION LOSS as the single most harmful
+# regularizer for Macro-F1 (0.630 -> 0.573), which is the same val-loss/Macro-F1
+# dissociation that was OL's headline finding. The best-justified recipe from SL+OL
+# is therefore Adam + light L2 on a FIXED epoch budget (OL Part 2/3 protocol), not
+# val-loss early stopping. Set UL_EARLY_STOP=1 to restore the stopping variant.
+NN_EARLY_STOP_PATIENCE = 10 if os.environ.get("UL_EARLY_STOP", "0") == "1" else None
 DEVICE          = os.environ.get("UL_DEVICE", "cpu")   # "cuda"/"mps" if available.
 
 # ── Extra credit: nonlinear manifold learning ─────────────────────────────────
